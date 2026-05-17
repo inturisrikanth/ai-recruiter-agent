@@ -12,10 +12,10 @@ type SidebarItem = {
 
 function itemClass(active: boolean) {
   return [
-    "group flex items-center justify-between rounded-2xl px-3 py-2.5 text-sm font-semibold transition",
+    "group relative flex items-center justify-between rounded-2xl px-3 py-3 text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/30",
     active
-      ? "bg-indigo-50 text-zinc-900 ring-1 ring-indigo-200/70 shadow-sm"
-      : "text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900 hover:shadow-sm hover:ring-1 hover:ring-zinc-200/70",
+      ? "bg-indigo-50/70 text-zinc-950 shadow-sm ring-1 ring-indigo-200/70 before:absolute before:left-1 before:top-1/2 before:h-6 before:w-1 before:-translate-y-1/2 before:rounded-full before:bg-indigo-600"
+      : "text-zinc-700 hover:bg-zinc-50 hover:text-zinc-950 hover:shadow-sm hover:ring-1 hover:ring-zinc-200/70",
   ].join(" ");
 }
 
@@ -151,7 +151,7 @@ export function Sidebar() {
   return (
     <div className="rounded-3xl bg-white shadow-sm ring-1 ring-zinc-200/70">
       <div className="border-b border-zinc-200/70 px-4 py-4">
-        <div className="text-xs font-medium text-zinc-500">Workspace</div>
+        <div className="text-xs font-semibold text-zinc-600">Workspace</div>
       </div>
 
       <nav aria-label="Sidebar" className="p-2">
@@ -163,17 +163,17 @@ export function Sidebar() {
                 <span className="flex items-center gap-2">
                   <span
                     className={[
-                      "grid size-9 place-items-center rounded-xl ring-1 transition",
+                      "grid size-10 place-items-center rounded-2xl ring-1 transition-colors",
                       active
-                        ? "bg-white ring-indigo-200/70 text-indigo-700"
-                        : "bg-white ring-zinc-200/70 text-zinc-700 group-hover:text-zinc-900",
+                        ? "bg-white text-indigo-700 shadow-sm ring-indigo-200/70"
+                        : "bg-white text-zinc-700 ring-zinc-200/70 group-hover:text-zinc-950 group-hover:ring-zinc-300/70",
                     ].join(" ")}
                   >
-                    <item.icon className="size-4" />
+                    <item.icon className="size-5" />
                   </span>
                   {item.label}
                 </span>
-                <span className="text-xs text-zinc-400 group-hover:text-zinc-500">
+                <span className="text-xs font-medium text-zinc-400 transition-colors group-hover:text-zinc-600">
                   →
                 </span>
               </Link>

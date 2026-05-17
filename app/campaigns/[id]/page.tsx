@@ -122,6 +122,23 @@ export default async function CampaignDetailPage({
 
   const skills = parseSkills(campaign.requiredSkills);
 
+  const { data: attachedLinks, error: attachedLinksError } = await supabase
+    .from("campaign_candidate_lists")
+    .select("list_id,created_at")
+    .eq("campaign_id", id)
+    .order("created_at", { ascending: true });
+
+  const attachedListIds = (attachedLinks ?? []).map((r) => String(r.list_id));
+  const { data: attachedLists, error: attachedListsError } = attachedListIds.length
+    ? await supabase.from("candidate_lists").select("id,list_name").in("id", attachedListIds)
+    : { data: [], error: null };
+
+  const nameById = new Map((attachedLists ?? []).map((r) => [String(r.id), String(r.list_name ?? "")]));
+  const attachedListNames =
+    !attachedLinksError && !attachedListsError
+      ? attachedListIds.map((id) => nameById.get(id) ?? "Candidate list").filter(Boolean)
+      : [];
+
   return (
     <AppShell>
       <header className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-zinc-200/70 sm:p-7">
@@ -171,6 +188,7 @@ export default async function CampaignDetailPage({
           campaignId={campaign.id}
           status={campaign.status}
           candidateCount={campaign.candidateCount}
+          attachedListNames={attachedListNames}
         />
       </section>
 

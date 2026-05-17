@@ -13,8 +13,8 @@ type TopNavItem = {
 
 function navItemClass(active: boolean) {
   return active
-    ? "inline-flex h-11 items-center gap-2 rounded-full bg-white px-4 text-sm font-semibold text-zinc-900 shadow-sm ring-1 ring-zinc-200/70"
-    : "inline-flex h-11 items-center gap-2 rounded-full px-4 text-sm font-semibold text-zinc-600 hover:bg-white/70 hover:text-zinc-900";
+    ? "group inline-flex h-11 items-center gap-2 rounded-full bg-white px-4 text-[15px] font-semibold text-zinc-950 shadow-sm ring-1 ring-zinc-200/70 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/30"
+    : "group inline-flex h-11 items-center gap-2 rounded-full px-4 text-[15px] font-semibold text-zinc-700 transition-colors hover:bg-white hover:text-zinc-950 hover:shadow-sm hover:ring-1 hover:ring-zinc-200/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/30";
 }
 
 function IconHome({ className }: { className?: string }) {
@@ -123,14 +123,14 @@ export function TopNav() {
   ];
 
   return (
-    <div className="sticky top-0 z-30 border-b border-zinc-200/70 bg-zinc-50/80 backdrop-blur">
+    <div className="sticky top-0 z-30 border-b border-zinc-200/70 bg-white/70 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/60">
       <div className="mx-auto flex w-full max-w-[1400px] items-center justify-between gap-3 px-4 py-4 sm:px-6">
         <Link href="/" className="flex items-center gap-3">
-          <div className="grid size-9 place-items-center rounded-xl bg-white shadow-sm ring-1 ring-zinc-200/70">
+          <div className="grid size-10 place-items-center rounded-2xl bg-white shadow-sm ring-1 ring-zinc-200/70">
             <svg
               aria-hidden="true"
               viewBox="0 0 24 24"
-              className="size-5 text-zinc-900"
+              className="size-[22px] text-zinc-950"
               fill="none"
             >
               <path
@@ -148,10 +148,10 @@ export function TopNav() {
             </svg>
           </div>
           <div className="leading-tight">
-            <div className="text-sm font-semibold text-zinc-900">
+            <div className="text-[15px] font-semibold tracking-tight text-zinc-950">
               AI Recruiter Assistant
             </div>
-            <div className="text-xs text-zinc-500">Workspace dashboard</div>
+            <div className="text-xs font-medium text-zinc-600">Workspace dashboard</div>
           </div>
         </Link>
 
@@ -162,8 +162,8 @@ export function TopNav() {
               <Link key={item.label} href={item.href} className={navItemClass(active)}>
                 <item.icon
                   className={[
-                    "size-4",
-                    active ? "text-indigo-700" : "text-zinc-500",
+                    "size-5",
+                    active ? "text-indigo-700" : "text-zinc-600 group-hover:text-zinc-900",
                   ].join(" ")}
                 />
                 {item.label}
@@ -179,7 +179,7 @@ export function TopNav() {
               <svg
                 aria-hidden="true"
                 viewBox="0 0 24 24"
-                className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500"
+                className="pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2 text-zinc-500"
                 fill="none"
               >
                 <path
@@ -196,7 +196,7 @@ export function TopNav() {
               </svg>
               <input
                 placeholder="Search"
-                className="h-10 w-[240px] rounded-full bg-white pl-9 pr-10 text-sm text-zinc-900 shadow-sm ring-1 ring-zinc-200/70 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900/10"
+                className="h-11 w-[200px] rounded-full bg-white pl-10 pr-10 text-sm text-zinc-950 shadow-sm ring-1 ring-zinc-200/70 placeholder:text-zinc-400 transition focus:outline-none focus:ring-2 focus:ring-indigo-500/15 md:w-[260px]"
               />
               <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-600 ring-1 ring-zinc-200/80">
                 ⌘K
@@ -206,12 +206,12 @@ export function TopNav() {
 
           <button
             type="button"
-            className="hidden sm:inline-flex h-10 items-center gap-2 rounded-full bg-white px-4 text-sm font-medium text-zinc-900 shadow-sm ring-1 ring-zinc-200/70 hover:bg-zinc-50"
+            className="hidden sm:inline-flex h-11 items-center gap-2 rounded-full bg-white px-4 text-sm font-medium text-zinc-950 shadow-sm ring-1 ring-zinc-200/70 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/30"
           >
             <svg
               aria-hidden="true"
               viewBox="0 0 24 24"
-              className="size-4 text-zinc-700"
+              className="size-5 text-zinc-700"
               fill="none"
             >
               <path
@@ -226,8 +226,8 @@ export function TopNav() {
                 strokeLinecap="round"
               />
             </svg>
-            Notifications
-            <span className="ml-1 grid size-5 place-items-center rounded-full bg-zinc-900 text-xs font-semibold text-white">
+            <span className="hidden md:inline">Notifications</span>
+            <span className="grid size-5 place-items-center rounded-full bg-zinc-900 text-xs font-semibold text-white">
               3
             </span>
           </button>
@@ -235,7 +235,7 @@ export function TopNav() {
           <button
             type="button"
             aria-label="Account"
-            className="grid size-10 place-items-center rounded-full bg-white shadow-sm ring-1 ring-zinc-200/70"
+            className="grid size-11 place-items-center rounded-full bg-white shadow-sm ring-1 ring-zinc-200/70 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/30"
           >
             <span className="text-sm font-semibold text-zinc-900">SI</span>
           </button>
@@ -244,7 +244,7 @@ export function TopNav() {
 
       <div className="mx-auto w-full max-w-[1400px] px-4 pb-3 sm:hidden">
         <details className="rounded-2xl bg-white shadow-sm ring-1 ring-zinc-200/70">
-          <summary className="cursor-pointer select-none list-none px-4 py-3 text-sm font-medium text-zinc-900">
+          <summary className="cursor-pointer select-none list-none px-4 py-3 text-sm font-semibold text-zinc-950 hover:bg-zinc-50">
             Menu
           </summary>
           <div className="border-t border-zinc-200/70 px-2 py-2">
@@ -256,13 +256,13 @@ export function TopNav() {
                     key={item.label}
                     href={item.href}
                     className={[
-                      "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold",
+                      "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-colors",
                       active
-                        ? "text-zinc-900 bg-zinc-50"
-                        : "text-zinc-700 hover:bg-zinc-50",
+                        ? "bg-indigo-50 text-zinc-950 ring-1 ring-indigo-200/70"
+                        : "text-zinc-700 hover:bg-zinc-50 hover:text-zinc-950",
                     ].join(" ")}
                   >
-                    <item.icon className="size-4 text-zinc-500" />
+                    <item.icon className="size-5 text-zinc-600" />
                     {item.label}
                   </Link>
                 );
@@ -274,7 +274,7 @@ export function TopNav() {
                 <svg
                   aria-hidden="true"
                   viewBox="0 0 24 24"
-                  className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500"
+                  className="pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2 text-zinc-500"
                   fill="none"
                 >
                   <path
@@ -291,7 +291,7 @@ export function TopNav() {
                 </svg>
                 <input
                   placeholder="Search"
-                  className="h-11 w-full rounded-2xl bg-zinc-50 pl-9 pr-3 text-sm text-zinc-900 ring-1 ring-zinc-200/70 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900/10"
+                  className="h-11 w-full rounded-2xl bg-zinc-50 pl-10 pr-3 text-sm text-zinc-950 ring-1 ring-zinc-200/70 placeholder:text-zinc-400 transition focus:outline-none focus:ring-2 focus:ring-indigo-500/15"
                 />
               </label>
             </div>

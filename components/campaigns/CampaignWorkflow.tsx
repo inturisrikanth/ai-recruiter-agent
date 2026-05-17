@@ -45,10 +45,12 @@ export function CampaignWorkflow({
   campaignId,
   status,
   candidateCount,
+  attachedListNames,
 }: {
   campaignId: string;
   status: CampaignStatus;
   candidateCount: number;
+  attachedListNames?: string[];
 }) {
   const router = useRouter();
   const [isUpdating, setIsUpdating] = useState(false);
@@ -87,6 +89,15 @@ export function CampaignWorkflow({
       state: "pending" as const,
     },
   ];
+
+  const attachedNamesText = useMemo(() => {
+    const names = (attachedListNames ?? []).map((n) => n.trim()).filter(Boolean);
+    if (!names.length) return null;
+    const max = 3;
+    const shown = names.slice(0, max);
+    const rest = names.length - shown.length;
+    return rest > 0 ? `${shown.join(", ")} +${rest} more` : shown.join(", ");
+  }, [attachedListNames]);
 
   return (
     <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-zinc-200/70 sm:p-6">
@@ -136,9 +147,19 @@ export function CampaignWorkflow({
                   Add candidates
                 </Link>
                 <div className="mt-2 text-xs text-zinc-600">
-                  {candidatesComplete
-                    ? `${candidateCount.toLocaleString()} candidates attached`
-                    : "No candidates yet"}
+                  {candidatesComplete ? (
+                    attachedNamesText ? (
+                      <>
+                        <span className="font-semibold text-zinc-900">{attachedNamesText}</span>{" "}
+                        <span aria-hidden="true">•</span>{" "}
+                        {candidateCount.toLocaleString()} candidates attached
+                      </>
+                    ) : (
+                      `${candidateCount.toLocaleString()} candidates attached`
+                    )
+                  ) : (
+                    "No candidates yet"
+                  )}
                 </div>
               </div>
             ) : null}
