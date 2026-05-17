@@ -2,6 +2,10 @@ import { AppShell } from "@/components/dashboard/AppShell";
 import { CampaignsManager, type Campaign } from "@/components/campaigns/CampaignsManager";
 import { supabase } from "@/lib/supabaseClient";
 
+// Ensure fresh data in production (avoid static/cached HTML).
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 type CampaignStatus = "Draft" | "Active" | "Paused" | "Failed" | "Deleted";
 type EmploymentType = "Full-time" | "Part-time" | "Contract" | "Internship";
 

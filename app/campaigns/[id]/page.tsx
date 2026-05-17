@@ -5,6 +5,10 @@ import { supabase } from "@/lib/supabaseClient";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+// Ensure fresh data in production (avoid cached RSC/HTML).
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 type CampaignStatus = "Draft" | "Active" | "Paused";
 type EmploymentType = "Full-time" | "Part-time" | "Contract" | "Internship";
 
