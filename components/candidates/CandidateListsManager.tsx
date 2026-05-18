@@ -20,6 +20,12 @@ type ParsedCandidateRow = {
   email: string;
 };
 
+type CsvWarnings = {
+  duplicateCount: number;
+  missingPhoneCount: number;
+  missingEmailCount: number;
+};
+
 const stableNumberFormatter = new Intl.NumberFormat("en-US");
 
 function formatDateTime(iso: string) {
@@ -47,11 +53,13 @@ function ModalShell({
   title,
   description,
   children,
+  footer,
   onClose,
 }: {
   title: string;
   description?: string;
   children: React.ReactNode;
+  footer?: React.ReactNode;
   onClose: () => void;
 }) {
   return (
@@ -64,7 +72,7 @@ function ModalShell({
         if (e.currentTarget === e.target) onClose();
       }}
     >
-      <div className="w-full max-w-3xl rounded-3xl bg-white shadow-xl ring-1 ring-zinc-200/70">
+      <div className="flex w-full max-w-3xl max-h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-3xl bg-white shadow-xl ring-1 ring-zinc-200/70">
         <div className="flex items-start justify-between gap-4 border-b border-zinc-200/70 px-5 py-5 sm:px-6">
           <div className="min-w-0">
             <div className="text-sm font-semibold text-zinc-900">{title}</div>
@@ -86,7 +94,12 @@ function ModalShell({
             </svg>
           </button>
         </div>
-        <div className="px-5 py-5 sm:px-6">{children}</div>
+        <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-6">{children}</div>
+        {footer ? (
+          <div className="border-t border-zinc-200/70 bg-white px-5 py-4 sm:px-6">
+            {footer}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -175,6 +188,11 @@ export function CandidateListsManager({
   const [file, setFile] = useState<File | null>(null);
   const [parsedRows, setParsedRows] = useState<ParsedCandidateRow[]>([]);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [csvWarnings, setCsvWarnings] = useState<CsvWarnings>({
+    duplicateCount: 0,
+    missingPhoneCount: 0,
+    missingEmailCount: 0,
+  });
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [selectionError, setSelectionError] = useState<string | null>(null);
@@ -186,7 +204,7 @@ export function CandidateListsManager({
   );
   const [selected, setSelected] = useState<Set<string>>(() => new Set(initialAttached));
 
-  const previewRows = useMemo(() => parsedRows.slice(0, 8), [parsedRows]);
+  const previewRows = useMemo(() => parsedRows.slice(0, 5), [parsedRows]);
   const selectionCount = selected.size;
   const selectionTotalCandidates = useMemo(() => {
     if (!campaignId) return 0;
@@ -202,6 +220,7 @@ export function CandidateListsManager({
     setFile(null);
     setParsedRows([]);
     setParseError(null);
+    setCsvWarnings({ duplicateCount: 0, missingPhoneCount: 0, missingEmailCount: 0 });
     setSaveError(null);
     setIsSaving(false);
   }
@@ -214,6 +233,7 @@ export function CandidateListsManager({
   async function parseCsv(selected: File) {
     setParseError(null);
     setParsedRows([]);
+    setCsvWarnings({ duplicateCount: 0, missingPhoneCount: 0, missingEmailCount: 0 });
     setSaveError(null);
 
     if (!selected.name.toLowerCase().endsWith(".csv")) {
@@ -254,7 +274,29 @@ export function CandidateListsManager({
       return;
     }
 
+    const normalizePhone = (value: string) => value.trim().replace(/[\s\-()]/g, "");
+    const normalizeEmail = (value: string) => value.trim().toLowerCase();
+
+    let duplicateCount = 0;
+    let missingPhoneCount = 0;
+    let missingEmailCount = 0;
+    const seen = new Set<string>();
+
+    for (const r of rows) {
+      const phone = normalizePhone(r.phone);
+      const email = normalizeEmail(r.email);
+
+      if (!phone) missingPhoneCount += 1;
+      if (!email) missingEmailCount += 1;
+
+      const key = phone ? `p:${phone}` : email ? `e:${email}` : null;
+      if (!key) continue;
+      if (seen.has(key)) duplicateCount += 1;
+      else seen.add(key);
+    }
+
     setParsedRows(rows);
+    setCsvWarnings({ duplicateCount, missingPhoneCount, missingEmailCount });
   }
 
   async function onSave() {
@@ -620,6 +662,21 @@ export function CandidateListsManager({
         <ModalShell
           title="Upload candidate list"
           description="CSV only for now. Required columns: name, phone, email."
+          footer={
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" onClick={closeModal} className={secondaryButtonClass()}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={onSave}
+                className={primaryButtonClass(isSaving)}
+                disabled={isSaving}
+              >
+                {isSaving ? "Saving…" : "Save list"}
+              </button>
+            </div>
+          }
           onClose={closeModal}
         >
           <div className="grid gap-5">
@@ -645,6 +702,7 @@ export function CandidateListsManager({
                   setFile(f);
                   setParsedRows([]);
                   setParseError(null);
+                  setCsvWarnings({ duplicateCount: 0, missingPhoneCount: 0, missingEmailCount: 0 });
                   setSaveError(null);
                   if (f) await parseCsv(f);
                 }}
@@ -660,6 +718,38 @@ export function CandidateListsManager({
               <div className="rounded-3xl bg-rose-50 p-4 text-sm text-rose-800 ring-1 ring-rose-200/70">
                 <div className="font-semibold text-rose-900">CSV issue</div>
                 <div className="mt-1">{parseError}</div>
+              </div>
+            ) : null}
+
+            {parsedRows.length &&
+            (csvWarnings.duplicateCount ||
+              csvWarnings.missingPhoneCount ||
+              csvWarnings.missingEmailCount) ? (
+              <div className="rounded-3xl bg-amber-50 p-4 text-sm text-amber-900 ring-1 ring-amber-200/70">
+                <div className="font-semibold">Warnings</div>
+                <div className="mt-2 space-y-1 text-sm text-amber-900">
+                  {csvWarnings.duplicateCount ? (
+                    <div>
+                      Warning: {formatNumber(csvWarnings.duplicateCount)} duplicate phone/email{" "}
+                      {csvWarnings.duplicateCount === 1 ? "entry" : "entries"} found in this file.
+                      These candidates may receive duplicate calls.
+                    </div>
+                  ) : null}
+                  {csvWarnings.missingPhoneCount ? (
+                    <div>
+                      Warning: {formatNumber(csvWarnings.missingPhoneCount)}{" "}
+                      {csvWarnings.missingPhoneCount === 1 ? "row is" : "rows are"} missing phone
+                      numbers. These candidates cannot be called unless phone numbers are added.
+                    </div>
+                  ) : null}
+                  {csvWarnings.missingEmailCount ? (
+                    <div>
+                      Warning: {formatNumber(csvWarnings.missingEmailCount)}{" "}
+                      {csvWarnings.missingEmailCount === 1 ? "row is" : "rows are"} missing email
+                      addresses. Email follow-up will not be available for those candidates.
+                    </div>
+                  ) : null}
+                </div>
               </div>
             ) : null}
 
@@ -697,11 +787,11 @@ export function CandidateListsManager({
                   </div>
                 </div>
 
-                {parsedRows.length > previewRows.length ? (
-                  <div className="mt-2 text-xs font-medium text-zinc-600">
-                    Showing first {previewRows.length} rows.
-                  </div>
-                ) : null}
+                <div className="mt-2 text-xs font-medium text-zinc-600">
+                  {parsedRows.length > previewRows.length
+                    ? `Showing first ${previewRows.length} of ${formatNumber(parsedRows.length)} candidates`
+                    : `Showing ${formatNumber(parsedRows.length)} candidate${parsedRows.length === 1 ? "" : "s"}`}
+                </div>
               </div>
             ) : null}
 
@@ -712,19 +802,6 @@ export function CandidateListsManager({
               </div>
             ) : null}
 
-            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <button type="button" onClick={closeModal} className={secondaryButtonClass()}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={onSave}
-                className={primaryButtonClass(isSaving)}
-                disabled={isSaving}
-              >
-                {isSaving ? "Saving…" : "Save list"}
-              </button>
-            </div>
           </div>
         </ModalShell>
       ) : null}

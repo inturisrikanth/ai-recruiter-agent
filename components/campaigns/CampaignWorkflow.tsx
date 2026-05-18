@@ -1,33 +1,9 @@
 "use client";
 
-import { supabase } from "@/lib/supabaseClient";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 type CampaignStatus = "Draft" | "Active" | "Paused";
-
-function nextStatus(status: CampaignStatus): CampaignStatus {
-  if (status === "Draft") return "Active";
-  if (status === "Active") return "Paused";
-  return "Active";
-}
-
-function actionLabel(status: CampaignStatus) {
-  if (status === "Draft") return "Activate campaign";
-  if (status === "Active") return "Pause campaign";
-  return "Resume campaign";
-}
-
-function actionButtonClass(status: CampaignStatus) {
-  if (status === "Active") {
-    return "bg-amber-600 text-white ring-amber-500/20 hover:bg-amber-500";
-  }
-  if (status === "Paused") {
-    return "bg-teal-600 text-white ring-teal-500/20 hover:bg-teal-500";
-  }
-  return "bg-emerald-600 text-white ring-emerald-500/20 hover:bg-emerald-500";
-}
 
 function stepCardClass(state: "complete" | "current" | "pending") {
   if (state === "complete") return "bg-emerald-50 ring-emerald-200/70";
@@ -41,32 +17,19 @@ function stepBadgeClass(state: "complete" | "current" | "pending") {
   return "bg-white text-zinc-700 ring-zinc-200/80";
 }
 
-export function CampaignWorkflow({
-  campaignId,
-  status,
-  candidateCount,
-  attachedListNames,
-}: {
+export function CampaignWorkflow(props: {
   campaignId: string;
   status: CampaignStatus;
   candidateCount: number;
   attachedListNames?: string[];
 }) {
-  const router = useRouter();
-  const [isUpdating, setIsUpdating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const target = useMemo(() => nextStatus(status), [status]);
+  const { campaignId, candidateCount, attachedListNames } = props;
   const candidatesComplete = candidateCount > 0;
-  const activatedAtLeastOnce = status !== "Draft";
-
-  const canActivate = status !== "Draft" || candidateCount > 0;
 
   const currentStep = useMemo(() => {
     if (!candidatesComplete) return 2;
-    if (status === "Draft") return 3;
     return 3;
-  }, [candidatesComplete, status]);
+  }, [candidatesComplete]);
 
   const steps = [
     { title: "Campaign details", state: "complete" as const },
@@ -76,16 +39,11 @@ export function CampaignWorkflow({
         candidatesComplete ? ("complete" as const) : currentStep === 2 ? ("current" as const) : ("pending" as const),
     },
     {
-      title: "Activate campaign",
-      state:
-        activatedAtLeastOnce
-          ? ("complete" as const)
-          : currentStep === 3
-            ? ("current" as const)
-            : ("pending" as const),
+      title: "Configure calls",
+      state: candidatesComplete ? ("current" as const) : ("pending" as const),
     },
     {
-      title: "Start calls",
+      title: "Review & activate",
       state: "pending" as const,
     },
   ];
@@ -166,70 +124,84 @@ export function CampaignWorkflow({
 
             {idx === 2 ? (
               <div className="mt-4">
-                <button
-                  type="button"
-                  disabled={isUpdating || !canActivate}
-                  onClick={async () => {
-                    if (!canActivate) return;
-                    setIsUpdating(true);
-                    setError(null);
-                    const { error } = await supabase
-                      .from("campaigns")
-                      .update({ status: target, updated_at: new Date().toISOString() })
-                      .eq("id", campaignId);
-                    if (error) {
-                      setError(error.message);
-                      setIsUpdating(false);
-                      return;
-                    }
-                    setIsUpdating(false);
-                    router.refresh();
-                  }}
-                  className={[
-                    "inline-flex h-10 w-full items-center justify-center rounded-2xl px-4 text-sm font-semibold shadow-sm ring-1 transition",
-                    isUpdating || !canActivate
-                      ? "bg-zinc-200 text-zinc-700 ring-zinc-200/70 cursor-not-allowed"
-                      : actionButtonClass(status),
-                  ].join(" ")}
-                >
-                  {isUpdating ? "Updating…" : actionLabel(status)}
-                </button>
                 <div className="mt-2 text-xs text-zinc-600">
-                  {status === "Draft" && candidateCount === 0
-                    ? "Add candidates first"
-                    : status === "Draft"
-                      ? "Activates outreach and tracking"
-                      : status === "Active"
-                        ? "Temporarily stops outreach"
-                        : "Continues outreach"}
+                  Set up AI call behavior, screening questions, and outreach settings.
+                </div>
+                <div className="mt-3">
+                  {candidatesComplete ? (
+                    <Link
+                      href={`/calls?campaignId=${encodeURIComponent(campaignId)}`}
+                      className="inline-flex h-10 w-full items-center justify-center rounded-2xl bg-white px-4 text-sm font-semibold text-zinc-900 shadow-sm ring-1 ring-zinc-200/70 hover:bg-zinc-50"
+                    >
+                      Configure calls
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      className="inline-flex h-10 w-full items-center justify-center rounded-2xl bg-zinc-200 px-4 text-sm font-semibold text-zinc-700 ring-1 ring-zinc-200/70 cursor-not-allowed"
+                    >
+                      Add candidates first
+                    </button>
+                  )}
                 </div>
               </div>
             ) : null}
 
             {idx === 3 ? (
               <div className="mt-4">
+                <div className="text-xs text-zinc-600">
+                  Review campaign setup and activate the campaign when ready.
+                </div>
                 <button
                   type="button"
                   disabled
-                  className="inline-flex h-10 w-full items-center justify-center rounded-2xl bg-zinc-200 px-4 text-sm font-semibold text-zinc-700 ring-1 ring-zinc-200/70 cursor-not-allowed"
+                  className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-2xl bg-zinc-200 px-4 text-sm font-semibold text-zinc-700 ring-1 ring-zinc-200/70 cursor-not-allowed"
                 >
-                  Start calls
+                  Review & activate
                 </button>
-                <div className="mt-2 text-xs text-zinc-600">
-                  Available after activation
-                </div>
               </div>
             ) : null}
           </div>
         ))}
       </div>
 
-      {error ? (
-        <div className="mt-4 rounded-3xl bg-rose-50 p-4 text-sm text-rose-800 ring-1 ring-rose-200/70">
-          <div className="font-semibold">Couldn’t update campaign</div>
-          <div className="mt-1">{error}</div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div
+          className={[
+            "rounded-3xl p-4 ring-1 shadow-sm transition hover:shadow-md",
+            stepCardClass("pending"),
+          ].join(" ")}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Step 5</div>
+            <span
+              className={[
+                "grid size-7 place-items-center rounded-2xl text-xs font-semibold ring-1",
+                stepBadgeClass("pending"),
+              ].join(" ")}
+            >
+              5
+            </span>
+          </div>
+
+          <div className="mt-3 text-sm font-semibold text-zinc-900">Start calls</div>
+          <div className="mt-1 text-sm text-zinc-600">Pending</div>
+          <div className="mt-4 text-xs text-zinc-600">
+            Begin AI outreach and start processing candidate calls.
+          </div>
+          <div className="mt-3">
+            <button
+              type="button"
+              disabled
+              className="inline-flex h-10 w-full items-center justify-center rounded-2xl bg-zinc-200 px-4 text-sm font-semibold text-zinc-700 ring-1 ring-zinc-200/70 cursor-not-allowed"
+            >
+              Start calls
+            </button>
+            <div className="mt-2 text-xs text-zinc-600">Available after activation</div>
+          </div>
         </div>
-      ) : null}
+      </div>
     </div>
   );
 }
