@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
-type CampaignStatus = "Draft" | "Active" | "Paused" | "Failed" | "Deleted";
+type CampaignStatus = "Draft" | "Ready" | "Calling" | "Completed";
 type EmploymentType = "Full-time" | "Part-time" | "Contract" | "Internship";
 
 export type Campaign = {
@@ -35,13 +35,12 @@ function parseSkills(skills: string) {
 
 function statusPill(status: CampaignStatus) {
   switch (status) {
-    case "Active":
+    case "Completed":
       return "bg-emerald-50 text-emerald-700 ring-emerald-200/70";
-    case "Paused":
-      return "bg-amber-50 text-amber-700 ring-amber-200/70";
-    case "Failed":
-    case "Deleted":
-      return "bg-rose-50 text-rose-700 ring-rose-200/70";
+    case "Calling":
+      return "bg-indigo-50 text-indigo-800 ring-indigo-200/70";
+    case "Ready":
+      return "bg-sky-50 text-sky-800 ring-sky-200/70";
     case "Draft":
     default:
       return "bg-zinc-100 text-zinc-700 ring-zinc-200/80";
@@ -155,10 +154,10 @@ export function CampaignsManager({ campaigns }: { campaigns: Campaign[] }) {
 
   const stats = useMemo(() => {
     const total = campaigns.length;
-    const active = campaigns.filter((c) => c.status === "Active").length;
+    const ready = campaigns.filter((c) => c.status === "Ready").length;
     const drafts = campaigns.filter((c) => c.status === "Draft").length;
     const candidates = campaigns.reduce((sum, c) => sum + c.candidateCount, 0);
-    return { total, active, drafts, candidates };
+    return { total, ready, drafts, candidates };
   }, [campaigns]);
 
   return (
@@ -206,11 +205,11 @@ export function CampaignsManager({ campaigns }: { campaigns: Campaign[] }) {
             accent="indigo"
           />
           <StatCard
-            label="Active"
-            value={stats.active.toLocaleString()}
-            delta="Running outreach"
-            badgeLabel="Live"
-            accent="emerald"
+            label="Ready"
+            value={stats.ready.toLocaleString()}
+            delta="Ready for activation"
+            badgeLabel="Preview"
+            accent="sky"
           />
           <StatCard
             label="Candidates"
@@ -268,7 +267,7 @@ export function CampaignsManager({ campaigns }: { campaigns: Campaign[] }) {
             </label>
 
             <div className="flex flex-wrap gap-2">
-              {(["All", "Active", "Draft", "Paused"] as const).map((s) => {
+              {(["All", "Draft", "Ready", "Calling", "Completed"] as const).map((s) => {
                 const active = statusFilter === s;
                 return (
                   <button

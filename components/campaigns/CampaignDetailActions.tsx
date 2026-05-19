@@ -6,6 +6,14 @@ import { useState } from "react";
 
 type EmploymentType = "Full-time" | "Part-time" | "Contract" | "Internship";
 
+export type CampaignEditInitial = {
+  campaignName: string;
+  jobTitle: string;
+  jobDescription: string;
+  requiredSkills: string;
+  employmentType: EmploymentType;
+};
+
 function ModalShell({
   title,
   description,
@@ -104,38 +112,46 @@ export function CampaignDetailActions({
   requiredSkills: string;
   employmentType: EmploymentType;
 }) {
-  const router = useRouter();
-  const [isEditOpen, setIsEditOpen] = useState(false);
-  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
-
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
-      <button
-        type="button"
-        onClick={() => setIsEditOpen(true)}
-        className="inline-flex h-11 items-center justify-center rounded-full bg-white px-5 text-sm font-semibold text-zinc-900 shadow-sm ring-1 ring-zinc-200/70 hover:bg-zinc-50"
-      >
-        Edit campaign
-      </button>
+      <CampaignEditAction
+        campaignId={campaignId}
+        initial={{ campaignName, jobTitle, jobDescription, requiredSkills, employmentType }}
+      />
+      <CampaignDeleteAction campaignId={campaignId} campaignName={campaignName} />
+    </div>
+  );
+}
 
-      <button
-        type="button"
-        onClick={() => setIsDeleteOpen(true)}
-        className="inline-flex h-11 items-center justify-center rounded-full bg-rose-50 px-5 text-sm font-semibold text-rose-700 shadow-sm ring-1 ring-rose-200/70 hover:bg-rose-100"
-      >
-        Delete campaign
+function defaultHeaderNeutralButtonClass() {
+  return "inline-flex h-11 items-center justify-center rounded-full bg-white px-5 text-sm font-semibold text-zinc-900 shadow-sm ring-1 ring-zinc-200/70 transition hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/15";
+}
+
+function defaultHeaderDangerButtonClass() {
+  return "inline-flex h-11 items-center justify-center rounded-full bg-rose-50 px-5 text-sm font-semibold text-rose-700 shadow-sm ring-1 ring-rose-200/70 transition hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500/15";
+}
+
+export function CampaignEditAction(props: {
+  campaignId: string;
+  initial: CampaignEditInitial;
+  label?: string;
+  className?: string;
+}) {
+  const router = useRouter();
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const label = props.label ?? "Edit campaign";
+  const className = props.className ?? defaultHeaderNeutralButtonClass();
+
+  return (
+    <>
+      <button type="button" onClick={() => setIsEditOpen(true)} className={className}>
+        {label}
       </button>
 
       {isEditOpen ? (
         <EditCampaignModal
-          campaignId={campaignId}
-          initial={{
-            campaignName,
-            jobTitle,
-            jobDescription,
-            requiredSkills,
-            employmentType,
-          }}
+          campaignId={props.campaignId}
+          initial={props.initial}
           onClose={() => setIsEditOpen(false)}
           onSaved={() => {
             setIsEditOpen(false);
@@ -143,11 +159,31 @@ export function CampaignDetailActions({
           }}
         />
       ) : null}
+    </>
+  );
+}
+
+export function CampaignDeleteAction(props: {
+  campaignId: string;
+  campaignName: string;
+  label?: string;
+  className?: string;
+}) {
+  const router = useRouter();
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const label = props.label ?? "Delete campaign";
+  const className = props.className ?? defaultHeaderDangerButtonClass();
+
+  return (
+    <>
+      <button type="button" onClick={() => setIsDeleteOpen(true)} className={className}>
+        {label}
+      </button>
 
       {isDeleteOpen ? (
         <DeleteCampaignModal
-          campaignId={campaignId}
-          campaignName={campaignName}
+          campaignId={props.campaignId}
+          campaignName={props.campaignName}
           onClose={() => setIsDeleteOpen(false)}
           onDeleted={() => {
             setIsDeleteOpen(false);
@@ -156,7 +192,7 @@ export function CampaignDetailActions({
           }}
         />
       ) : null}
-    </div>
+    </>
   );
 }
 

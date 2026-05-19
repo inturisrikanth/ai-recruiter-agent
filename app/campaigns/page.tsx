@@ -6,19 +6,12 @@ import { supabase } from "@/lib/supabaseClient";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type CampaignStatus = "Draft" | "Active" | "Paused" | "Failed" | "Deleted";
+type CampaignStatus = "Draft" | "Ready" | "Calling" | "Completed";
 type EmploymentType = "Full-time" | "Part-time" | "Contract" | "Internship";
 
 function normalizeStatus(value: string): CampaignStatus {
-  if (
-    value === "Active" ||
-    value === "Paused" ||
-    value === "Draft" ||
-    value === "Failed" ||
-    value === "Deleted"
-  ) {
-    return value;
-  }
+  if (value === "Ready" || value === "Calling" || value === "Completed" || value === "Draft") return value;
+  // Legacy / unknown statuses (e.g. Active, Paused) are treated as Draft in the MVP.
   return "Draft";
 }
 

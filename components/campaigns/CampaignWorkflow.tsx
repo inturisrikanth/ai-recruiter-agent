@@ -1,9 +1,10 @@
 "use client";
 
+import { CampaignEditAction, type CampaignEditInitial } from "@/components/campaigns/CampaignDetailActions";
 import Link from "next/link";
 import { useMemo } from "react";
 
-type CampaignStatus = "Draft" | "Active" | "Paused";
+type CampaignStatus = "Draft" | "Ready" | "Calling" | "Completed";
 
 function stepCardClass(state: "complete" | "current" | "pending") {
   if (state === "complete") return "bg-emerald-50 ring-emerald-200/70";
@@ -17,19 +18,63 @@ function stepBadgeClass(state: "complete" | "current" | "pending") {
   return "bg-white text-zinc-700 ring-zinc-200/80";
 }
 
+function workflowActionButtonClass(disabled?: boolean) {
+  return [
+    "inline-flex h-10 w-full items-center justify-center rounded-2xl px-4 text-sm font-semibold shadow-sm ring-1 transition",
+    disabled
+      ? "bg-zinc-200 text-zinc-700 ring-zinc-200/70 cursor-not-allowed"
+      : "bg-white text-zinc-900 ring-zinc-200/70 hover:bg-zinc-50",
+  ].join(" ");
+}
+
+function StatusIndicator({ state }: { state: "complete" | "current" | "pending" }) {
+  const label = state === "complete" ? "Complete" : state === "current" ? "Next" : "Pending";
+  const styles =
+    state === "complete"
+      ? { ring: "ring-emerald-200/70", bg: "bg-emerald-50", text: "text-emerald-800", icon: "text-emerald-700" }
+      : state === "current"
+        ? { ring: "ring-indigo-200/70", bg: "bg-indigo-50", text: "text-indigo-800", icon: "text-indigo-700" }
+        : { ring: "ring-zinc-200/70", bg: "bg-zinc-100", text: "text-zinc-700", icon: "text-zinc-500" };
+
+  return (
+    <div
+      className={[
+        "mt-3 inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ring-1",
+        styles.bg,
+        styles.ring,
+        styles.text,
+      ].join(" ")}
+    >
+      {state === "complete" ? (
+        <span className={styles.icon} aria-hidden="true">
+          ✓
+        </span>
+      ) : (
+        <span className={["inline-block size-2 rounded-full", styles.icon, styles.bg].join(" ")} aria-hidden="true" />
+      )}
+      <span>{label}</span>
+    </div>
+  );
+}
+
 export function CampaignWorkflow(props: {
   campaignId: string;
   status: CampaignStatus;
   candidateCount: number;
+  callsConfigured: boolean;
+  editInitial: CampaignEditInitial;
   attachedListNames?: string[];
 }) {
-  const { campaignId, candidateCount, attachedListNames } = props;
+  const { campaignId, candidateCount, callsConfigured, editInitial, status } = props;
   const candidatesComplete = candidateCount > 0;
+  const activated = status === "Ready" || status === "Calling" || status === "Completed";
 
   const currentStep = useMemo(() => {
     if (!candidatesComplete) return 2;
-    return 3;
-  }, [candidatesComplete]);
+    if (!callsConfigured) return 3;
+    if (!activated) return 4;
+    return 5;
+  }, [candidatesComplete, callsConfigured, activated]);
 
   const steps = [
     { title: "Campaign details", state: "complete" as const },
@@ -40,22 +85,15 @@ export function CampaignWorkflow(props: {
     },
     {
       title: "Configure calls",
-      state: candidatesComplete ? ("current" as const) : ("pending" as const),
+      state: !candidatesComplete ? ("pending" as const) : callsConfigured ? ("complete" as const) : ("current" as const),
     },
     {
       title: "Review & activate",
-      state: "pending" as const,
+      state: !candidatesComplete || !callsConfigured ? ("pending" as const) : activated ? ("complete" as const) : ("current" as const),
     },
   ];
 
-  const attachedNamesText = useMemo(() => {
-    const names = (attachedListNames ?? []).map((n) => n.trim()).filter(Boolean);
-    if (!names.length) return null;
-    const max = 3;
-    const shown = names.slice(0, max);
-    const rest = names.length - shown.length;
-    return rest > 0 ? `${shown.join(", ")} +${rest} more` : shown.join(", ");
-  }, [attachedListNames]);
+  const step5State = activated ? ("current" as const) : ("pending" as const);
 
   return (
     <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-zinc-200/70 sm:p-6">
@@ -73,7 +111,7 @@ export function CampaignWorkflow(props: {
           <div
             key={s.title}
             className={[
-              "rounded-3xl p-4 ring-1 shadow-sm transition hover:shadow-md",
+              "flex h-full flex-col rounded-3xl p-4 ring-1 shadow-sm transition hover:shadow-md",
               stepCardClass(s.state),
             ].join(" ")}
           >
@@ -92,74 +130,76 @@ export function CampaignWorkflow(props: {
             </div>
 
             <div className="mt-3 text-sm font-semibold text-zinc-900">{s.title}</div>
-            <div className="mt-1 text-sm text-zinc-600">
-              {s.state === "complete" ? "Complete" : s.state === "current" ? "Next" : "Pending"}
-            </div>
+
+            {idx === 0 ? (
+              <div className="mt-auto pt-4">
+                <div className="text-xs text-zinc-600">Review the role brief and requirements.</div>
+                <div className="mt-3">
+                  <CampaignEditAction
+                    campaignId={campaignId}
+                    initial={editInitial}
+                    className={workflowActionButtonClass(false)}
+                    label="Edit campaign"
+                  />
+                </div>
+                <StatusIndicator state={s.state} />
+              </div>
+            ) : null}
 
             {idx === 1 ? (
-              <div className="mt-4">
-                <Link
-                  href={`/candidates?campaignId=${encodeURIComponent(campaignId)}`}
-                  className="inline-flex h-10 w-full items-center justify-center rounded-2xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm ring-1 ring-indigo-500/20 transition hover:bg-indigo-500 hover:shadow-md"
-                >
-                  Add candidates
-                </Link>
-                <div className="mt-2 text-xs text-zinc-600">
-                  {candidatesComplete ? (
-                    attachedNamesText ? (
-                      <>
-                        <span className="font-semibold text-zinc-900">{attachedNamesText}</span>{" "}
-                        <span aria-hidden="true">•</span>{" "}
-                        {candidateCount.toLocaleString()} candidates attached
-                      </>
-                    ) : (
-                      `${candidateCount.toLocaleString()} candidates attached`
-                    )
-                  ) : (
-                    "No candidates yet"
-                  )}
+              <div className="mt-auto pt-4">
+                <div className="text-xs text-zinc-600">Attach reusable candidate lists to this campaign.</div>
+                <div className="mt-3">
+                  <Link
+                    href={`/candidates?campaignId=${encodeURIComponent(campaignId)}`}
+                    className={workflowActionButtonClass(false)}
+                  >
+                    Add candidates
+                  </Link>
                 </div>
+                <StatusIndicator state={s.state} />
               </div>
             ) : null}
 
             {idx === 2 ? (
-              <div className="mt-4">
-                <div className="mt-2 text-xs text-zinc-600">
-                  Set up AI call behavior, screening questions, and outreach settings.
-                </div>
+              <div className="mt-auto pt-4">
+                <div className="text-xs text-zinc-600">Set up screening questions and instructions.</div>
                 <div className="mt-3">
                   {candidatesComplete ? (
                     <Link
                       href={`/calls?campaignId=${encodeURIComponent(campaignId)}`}
-                      className="inline-flex h-10 w-full items-center justify-center rounded-2xl bg-white px-4 text-sm font-semibold text-zinc-900 shadow-sm ring-1 ring-zinc-200/70 hover:bg-zinc-50"
+                      className={workflowActionButtonClass(false)}
                     >
-                      Configure calls
+                      {callsConfigured ? "Edit call configuration" : "Configure calls"}
                     </Link>
                   ) : (
-                    <button
-                      type="button"
-                      disabled
-                      className="inline-flex h-10 w-full items-center justify-center rounded-2xl bg-zinc-200 px-4 text-sm font-semibold text-zinc-700 ring-1 ring-zinc-200/70 cursor-not-allowed"
-                    >
+                    <button type="button" disabled className={workflowActionButtonClass(true)}>
                       Add candidates first
                     </button>
                   )}
                 </div>
+                <StatusIndicator state={s.state} />
               </div>
             ) : null}
 
             {idx === 3 ? (
-              <div className="mt-4">
-                <div className="text-xs text-zinc-600">
-                  Review campaign setup and activate the campaign when ready.
+              <div className="mt-auto pt-4">
+                <div className="text-xs text-zinc-600">Review setup and activate when ready.</div>
+                <div className="mt-3">
+                  {!candidatesComplete || !callsConfigured ? (
+                    <button type="button" disabled className={workflowActionButtonClass(true)}>
+                      Configure calls first
+                    </button>
+                  ) : (
+                    <Link
+                      href={`/campaigns/${encodeURIComponent(campaignId)}/review`}
+                      className={workflowActionButtonClass(false)}
+                    >
+                      {activated ? "View review" : "Review & activate"}
+                    </Link>
+                  )}
                 </div>
-                <button
-                  type="button"
-                  disabled
-                  className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-2xl bg-zinc-200 px-4 text-sm font-semibold text-zinc-700 ring-1 ring-zinc-200/70 cursor-not-allowed"
-                >
-                  Review & activate
-                </button>
+                <StatusIndicator state={s.state} />
               </div>
             ) : null}
           </div>
@@ -169,8 +209,8 @@ export function CampaignWorkflow(props: {
       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div
           className={[
-            "rounded-3xl p-4 ring-1 shadow-sm transition hover:shadow-md",
-            stepCardClass("pending"),
+            "flex h-full flex-col rounded-3xl p-4 ring-1 shadow-sm transition hover:shadow-md",
+            stepCardClass(step5State),
           ].join(" ")}
         >
           <div className="flex items-start justify-between gap-3">
@@ -178,7 +218,7 @@ export function CampaignWorkflow(props: {
             <span
               className={[
                 "grid size-7 place-items-center rounded-2xl text-xs font-semibold ring-1",
-                stepBadgeClass("pending"),
+                stepBadgeClass(step5State),
               ].join(" ")}
             >
               5
@@ -186,19 +226,27 @@ export function CampaignWorkflow(props: {
           </div>
 
           <div className="mt-3 text-sm font-semibold text-zinc-900">Start calls</div>
-          <div className="mt-1 text-sm text-zinc-600">Pending</div>
           <div className="mt-4 text-xs text-zinc-600">
             Begin AI outreach and start processing candidate calls.
           </div>
-          <div className="mt-3">
-            <button
-              type="button"
-              disabled
-              className="inline-flex h-10 w-full items-center justify-center rounded-2xl bg-zinc-200 px-4 text-sm font-semibold text-zinc-700 ring-1 ring-zinc-200/70 cursor-not-allowed"
-            >
-              Start calls
-            </button>
+          <div className="mt-auto pt-4">
+            {activated ? (
+              <button
+                type="button"
+                onClick={() => {
+                  window.alert("Calling is not implemented yet.");
+                }}
+                className={workflowActionButtonClass(false)}
+              >
+                Start calls
+              </button>
+            ) : (
+              <button type="button" disabled className={workflowActionButtonClass(true)}>
+                Activate campaign first
+              </button>
+            )}
             <div className="mt-2 text-xs text-zinc-600">Available after activation</div>
+            <StatusIndicator state={step5State} />
           </div>
         </div>
       </div>

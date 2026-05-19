@@ -1,4 +1,4 @@
-import { CampaignDetailActions } from "@/components/campaigns/CampaignDetailActions";
+import { CampaignDeleteAction } from "@/components/campaigns/CampaignDetailActions";
 import { CampaignWorkflow } from "@/components/campaigns/CampaignWorkflow";
 import { AppShell } from "@/components/dashboard/AppShell";
 import { supabase } from "@/lib/supabaseClient";
@@ -9,11 +9,12 @@ import { notFound } from "next/navigation";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type CampaignStatus = "Draft" | "Active" | "Paused";
+type CampaignStatus = "Draft" | "Ready" | "Calling" | "Completed";
 type EmploymentType = "Full-time" | "Part-time" | "Contract" | "Internship";
 
 function normalizeStatus(value: string): CampaignStatus {
-  if (value === "Active" || value === "Paused" || value === "Draft") return value;
+  if (value === "Ready" || value === "Calling" || value === "Completed" || value === "Draft") return value;
+  // Legacy / unknown statuses (e.g. Active, Paused) are treated as Draft in the MVP.
   return "Draft";
 }
 
@@ -49,10 +50,12 @@ function parseSkills(skills: string) {
 
 function statusPill(status: CampaignStatus) {
   switch (status) {
-    case "Active":
+    case "Completed":
       return "bg-emerald-50 text-emerald-700 ring-emerald-200/70";
-    case "Paused":
-      return "bg-amber-50 text-amber-700 ring-amber-200/70";
+    case "Calling":
+      return "bg-indigo-50 text-indigo-800 ring-indigo-200/70";
+    case "Ready":
+      return "bg-sky-50 text-sky-800 ring-sky-200/70";
     case "Draft":
     default:
       return "bg-zinc-100 text-zinc-700 ring-zinc-200/80";
@@ -139,6 +142,13 @@ export default async function CampaignDetailPage({
       ? attachedListIds.map((id) => nameById.get(id) ?? "Candidate list").filter(Boolean)
       : [];
 
+  const { data: callConfig, error: callConfigError } = await supabase
+    .from("call_configurations")
+    .select("id")
+    .eq("campaign_id", id)
+    .maybeSingle();
+  const callsConfigured = !callConfigError && Boolean(callConfig?.id);
+
   return (
     <AppShell>
       <header className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-zinc-200/70 sm:p-7">
@@ -172,14 +182,7 @@ export default async function CampaignDetailPage({
             <p className="mt-1 text-sm text-zinc-600">{campaign.jobTitle}</p>
           </div>
 
-          <CampaignDetailActions
-            campaignId={campaign.id}
-            campaignName={campaign.campaignName}
-            jobTitle={campaign.jobTitle}
-            jobDescription={campaign.jobDescription}
-            requiredSkills={campaign.requiredSkills}
-            employmentType={campaign.employmentType}
-          />
+          <CampaignDeleteAction campaignId={campaign.id} campaignName={campaign.campaignName} />
         </div>
       </header>
 
@@ -188,6 +191,14 @@ export default async function CampaignDetailPage({
           campaignId={campaign.id}
           status={campaign.status}
           candidateCount={campaign.candidateCount}
+          callsConfigured={callsConfigured}
+          editInitial={{
+            campaignName: campaign.campaignName,
+            jobTitle: campaign.jobTitle,
+            jobDescription: campaign.jobDescription,
+            requiredSkills: campaign.requiredSkills,
+            employmentType: campaign.employmentType,
+          }}
           attachedListNames={attachedListNames}
         />
       </section>
