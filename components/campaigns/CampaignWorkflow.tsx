@@ -2,9 +2,10 @@
 
 import { CampaignEditAction, type CampaignEditInitial } from "@/components/campaigns/CampaignDetailActions";
 import Link from "next/link";
-import { useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
 
-type CampaignStatus = "Draft" | "Ready" | "Calling" | "Completed";
+type CampaignStatus = "Draft" | "Ready" | "Calling" | "Paused" | "Completed";
 
 function stepCardClass(state: "complete" | "current" | "pending") {
   if (state === "complete") return "bg-emerald-50 ring-emerald-200/70";
@@ -64,10 +65,21 @@ export function CampaignWorkflow(props: {
   callsConfigured: boolean;
   editInitial: CampaignEditInitial;
   attachedListNames?: string[];
+  hasCallSession?: boolean;
+  callSessionStatus?: string | null;
 }) {
-  const { campaignId, candidateCount, callsConfigured, editInitial, status } = props;
+  const { campaignId, candidateCount, callsConfigured, editInitial, status, hasCallSession = false, callSessionStatus } = props;
+  const router = useRouter();
+  const [isQueueing, setIsQueueing] = useState(false);
+  const [queueError, setQueueError] = useState<string | null>(null);
   const candidatesComplete = candidateCount > 0;
-  const activated = status === "Ready" || status === "Calling" || status === "Completed";
+  const activated = status === "Ready" || status === "Calling" || status === "Paused" || status === "Completed";
+  const canStartCalls = status === "Ready";
+  const outreachActive = status === "Calling" || status === "Paused" || status === "Completed";
+  const canViewOutreach = outreachActive || hasCallSession;
+  const sessionLower = String(callSessionStatus ?? "").toLowerCase();
+  const sessionPaused = sessionLower === "paused";
+  const sessionStopped = sessionLower === "stopped";
 
   const currentStep = useMemo(() => {
     if (!candidatesComplete) return 2;
@@ -93,7 +105,42 @@ export function CampaignWorkflow(props: {
     },
   ];
 
-  const step5State = activated ? ("current" as const) : ("pending" as const);
+  const step5State = canStartCalls ? ("current" as const) : outreachActive ? ("complete" as const) : ("pending" as const);
+
+  async function onStartCalls() {
+    if (!canStartCalls || isQueueing) return;
+    setIsQueueing(true);
+    setQueueError(null);
+
+    try {
+      const res = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/call-queue`, {
+        method: "POST",
+        cache: "no-store",
+      });
+
+      let payload: unknown = null;
+      try {
+        payload = await res.json();
+      } catch {
+        payload = null;
+      }
+
+      if (!res.ok) {
+        const message =
+          payload && typeof payload === "object" && "error" in payload
+            ? String((payload as { error?: unknown }).error ?? "Couldn’t start calls.")
+            : `Couldn’t start calls (HTTP ${res.status}).`;
+        throw new Error(message);
+      }
+
+      router.push(`/outreach?campaignId=${encodeURIComponent(campaignId)}`);
+      router.refresh();
+    } catch (e) {
+      setQueueError(e instanceof Error ? e.message : "Couldn’t start calls.");
+    } finally {
+      setIsQueueing(false);
+    }
+  }
 
   return (
     <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-zinc-200/70 sm:p-6">
@@ -230,22 +277,38 @@ export function CampaignWorkflow(props: {
             Begin AI outreach and start processing candidate calls.
           </div>
           <div className="mt-auto pt-4">
-            {activated ? (
+            {canStartCalls ? (
+              <button
+                type="button"
+                onClick={onStartCalls}
+                disabled={isQueueing}
+                className={workflowActionButtonClass(isQueueing)}
+              >
+                {isQueueing ? "Starting…" : "Start calls"}
+              </button>
+            ) : canViewOutreach ? (
               <button
                 type="button"
                 onClick={() => {
-                  window.alert("Calling is not implemented yet.");
+                  router.push(`/outreach?campaignId=${encodeURIComponent(campaignId)}`);
                 }}
                 className={workflowActionButtonClass(false)}
               >
-                Start calls
+                View outreach
               </button>
             ) : (
               <button type="button" disabled className={workflowActionButtonClass(true)}>
                 Activate campaign first
               </button>
             )}
-            <div className="mt-2 text-xs text-zinc-600">Available after activation</div>
+            <div className="mt-2 text-xs text-zinc-600">Available when campaign is Ready</div>
+            {sessionPaused ? <div className="mt-1 text-xs font-medium text-amber-800">Outreach is paused</div> : null}
+            {sessionStopped ? (
+              <div className="mt-1 text-xs font-medium text-zinc-700">
+                Outreach was stopped. Activate again to restart.
+              </div>
+            ) : null}
+            {queueError ? <div className="mt-3 text-xs font-semibold text-rose-700">{queueError}</div> : null}
             <StatusIndicator state={step5State} />
           </div>
         </div>

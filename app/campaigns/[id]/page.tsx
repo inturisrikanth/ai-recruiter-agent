@@ -9,12 +9,12 @@ import { notFound } from "next/navigation";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type CampaignStatus = "Draft" | "Ready" | "Calling" | "Completed";
+type CampaignStatus = "Draft" | "Ready" | "Calling" | "Paused" | "Completed";
 type EmploymentType = "Full-time" | "Part-time" | "Contract" | "Internship";
 
 function normalizeStatus(value: string): CampaignStatus {
-  if (value === "Ready" || value === "Calling" || value === "Completed" || value === "Draft") return value;
-  // Legacy / unknown statuses (e.g. Active, Paused) are treated as Draft in the MVP.
+  if (value === "Ready" || value === "Calling" || value === "Paused" || value === "Completed" || value === "Draft") return value;
+  // Legacy / unknown statuses (e.g. Active) are treated as Draft in the MVP.
   return "Draft";
 }
 
@@ -54,6 +54,8 @@ function statusPill(status: CampaignStatus) {
       return "bg-emerald-50 text-emerald-700 ring-emerald-200/70";
     case "Calling":
       return "bg-indigo-50 text-indigo-800 ring-indigo-200/70";
+    case "Paused":
+      return "bg-amber-50 text-amber-900 ring-amber-200/70";
     case "Ready":
       return "bg-sky-50 text-sky-800 ring-sky-200/70";
     case "Draft":
@@ -149,6 +151,28 @@ export default async function CampaignDetailPage({
     .maybeSingle();
   const callsConfigured = !callConfigError && Boolean(callConfig?.id);
 
+  const activeSessionStatuses: string[] = ["queued", "running", "paused"];
+  const { data: activeSession, error: activeSessionError } = await supabase
+    .from("campaign_call_sessions")
+    .select("id,status,total_candidates,started_at,completed_at,created_at")
+    .eq("campaign_id", id)
+    .in("status", activeSessionStatuses)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { data: latestSession, error: latestSessionError } = !activeSession?.id
+    ? await supabase
+        .from("campaign_call_sessions")
+        .select("id,status,total_candidates,started_at,completed_at,created_at")
+        .eq("campaign_id", id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    : { data: null, error: null };
+
+  const callSession = activeSession?.id ? activeSession : latestSession;
+
   return (
     <AppShell>
       <header className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-zinc-200/70 sm:p-7">
@@ -200,6 +224,8 @@ export default async function CampaignDetailPage({
             employmentType: campaign.employmentType,
           }}
           attachedListNames={attachedListNames}
+          hasCallSession={Boolean(callSession?.id) && !(activeSessionError ?? latestSessionError)}
+          callSessionStatus={callSession?.id ? String(callSession.status ?? "") : null}
         />
       </section>
 

@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
-type CampaignStatus = "Draft" | "Ready" | "Calling" | "Completed";
+type CampaignStatus = "Draft" | "Ready" | "Calling" | "Paused" | "Completed";
 type EmploymentType = "Full-time" | "Part-time" | "Contract" | "Internship";
 
 export type Campaign = {
@@ -39,6 +39,8 @@ function statusPill(status: CampaignStatus) {
       return "bg-emerald-50 text-emerald-700 ring-emerald-200/70";
     case "Calling":
       return "bg-indigo-50 text-indigo-800 ring-indigo-200/70";
+    case "Paused":
+      return "bg-amber-50 text-amber-900 ring-amber-200/70";
     case "Ready":
       return "bg-sky-50 text-sky-800 ring-sky-200/70";
     case "Draft":

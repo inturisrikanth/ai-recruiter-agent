@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-export type CampaignStatus = "Draft" | "Ready" | "Calling" | "Completed";
+export type CampaignStatus = "Draft" | "Ready" | "Calling" | "Paused" | "Completed";
 
 export type CampaignRow = {
   name: string;
@@ -19,6 +19,7 @@ type CampaignTableProps = {
 function statusClass(status: CampaignStatus) {
   if (status === "Completed") return "bg-emerald-50 text-emerald-700 ring-emerald-200/70";
   if (status === "Calling") return "bg-indigo-50 text-indigo-800 ring-indigo-200/70";
+  if (status === "Paused") return "bg-amber-50 text-amber-900 ring-amber-200/70";
   if (status === "Ready") return "bg-sky-50 text-sky-800 ring-sky-200/70";
   return "bg-zinc-100 text-zinc-700 ring-zinc-200/80";
 }

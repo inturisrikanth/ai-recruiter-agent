@@ -74,6 +74,31 @@ function IconCalls({ className }: { className?: string }) {
   );
 }
 
+function IconOutreach({ className }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none">
+      <path
+        d="M6.5 7.5A4.5 4.5 0 0 1 11 3h2a4.5 4.5 0 0 1 4.5 4.5V10"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <path
+        d="M8 10h8c1.4 0 2.5 1.1 2.5 2.5v1c0 4.2-3.3 7.5-7.5 7.5S3.5 17.7 3.5 13.5v-1C3.5 11.1 4.6 10 6 10h2Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M15.5 12.8c.8.5 1.3 1.4 1.3 2.4s-.5 1.9-1.3 2.4"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 function IconReports({ className }: { className?: string }) {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" className={className} fill="none">
@@ -133,7 +158,8 @@ export function Sidebar() {
       match: (p) => p.startsWith("/candidates"),
       icon: IconCandidates,
     },
-    { label: "Calls", href: "/calls", match: (p) => p.startsWith("/calls"), icon: IconCalls },
+    { label: "Call Setup", href: "/calls", match: (p) => p.startsWith("/calls"), icon: IconCalls },
+    { label: "Outreach", href: "/outreach", match: (p) => p.startsWith("/outreach"), icon: IconOutreach },
     {
       label: "Reports",
       href: "/reports",

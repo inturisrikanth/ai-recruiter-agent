@@ -36,8 +36,8 @@ export default async function CallsPage({
     return (
       <AppShell>
         <header className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-zinc-200/70 sm:p-6">
-          <div className="text-sm font-medium text-zinc-500">Calls</div>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 sm:text-3xl">Calls</h1>
+          <div className="text-sm font-medium text-zinc-500">Call setup</div>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 sm:text-3xl">Call setup</h1>
           <p className="mt-1 text-sm text-zinc-600">
             Configure screening questions for AI recruiter calls.
           </p>
@@ -71,9 +71,9 @@ export default async function CallsPage({
     return (
       <AppShell>
         <header className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-zinc-200/70 sm:p-6">
-          <div className="text-sm font-medium text-zinc-500">Calls</div>
+          <div className="text-sm font-medium text-zinc-500">Call setup</div>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 sm:text-3xl">
-            Configure calls
+            Call setup
           </h1>
           <p className="mt-1 text-sm text-zinc-600">Set up AI call behavior and screening questions.</p>
         </header>
@@ -117,9 +117,9 @@ export default async function CallsPage({
       <header className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-zinc-200/70 sm:p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <div className="text-sm font-medium text-zinc-500">Calls</div>
+            <div className="text-sm font-medium text-zinc-500">Call setup</div>
             <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 sm:text-3xl">
-              Configure calls
+              Call setup
             </h1>
             <p className="mt-1 text-sm text-zinc-600">
               Configure what questions the AI recruiter should ask candidates during calls.

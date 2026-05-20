@@ -110,6 +110,7 @@ export function TopNav() {
         p.startsWith("/campaigns") ||
         p.startsWith("/candidates") ||
         p.startsWith("/calls") ||
+        p.startsWith("/outreach") ||
         p.startsWith("/reports") ||
         p.startsWith("/settings"),
       icon: IconWorkspace,
