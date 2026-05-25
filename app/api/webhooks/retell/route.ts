@@ -27,13 +27,83 @@ function pickString(value: unknown) {
   return s.length ? s : null;
 }
 
+function getInVoicemail(call: Record<string, unknown>) {
+  return (
+    Boolean((call as { in_voicemail?: unknown }).in_voicemail) ||
+    Boolean((call as { call_analysis?: { in_voicemail?: unknown } }).call_analysis?.in_voicemail) ||
+    Boolean((call as { post_call_analysis?: { in_voicemail?: unknown } }).post_call_analysis?.in_voicemail)
+  );
+}
+
+function getCallSuccessful(call: Record<string, unknown>) {
+  const direct = (call as { call_successful?: unknown }).call_successful;
+  const nested =
+    (call as { call_analysis?: { call_successful?: unknown } }).call_analysis?.call_successful ??
+    (call as { post_call_analysis?: { call_successful?: unknown } }).post_call_analysis?.call_successful;
+  if (typeof (direct ?? nested) === "boolean") return Boolean(direct ?? nested);
+  return null;
+}
+
+function getDurationMs(call: Record<string, unknown>) {
+  const n = Number((call as { duration_ms?: unknown }).duration_ms);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}
+
+function getUserUtteranceCounts(call: Record<string, unknown>) {
+  let user = 0;
+  let agent = 0;
+  let total = 0;
+
+  const arrays: unknown[] = [
+    (call as { transcript_object?: unknown }).transcript_object,
+    (call as { transcript_with_tool_calls?: unknown }).transcript_with_tool_calls,
+  ];
+
+  for (const a of arrays) {
+    if (!Array.isArray(a)) continue;
+    for (const item of a) {
+      if (!item || typeof item !== "object") continue;
+      const obj = item as Record<string, unknown>;
+      const speaker = String(obj.speaker ?? obj.role ?? obj.from ?? "").toLowerCase();
+      const text = String(obj.text ?? obj.content ?? obj.utterance ?? "").trim();
+      if (!text) continue;
+      total += 1;
+      if (speaker === "agent" || speaker === "assistant") agent += 1;
+      else if (speaker === "user" || speaker === "callee" || speaker === "human" || speaker === "customer" || speaker === "candidate") {
+        user += 1;
+      }
+    }
+  }
+
+  return { user, agent, total };
+}
+
+function isNoAnswerLikeDisconnection(reason: string) {
+  const r = reason.toLowerCase();
+  return (
+    r.includes("voicemail") ||
+    r.includes("dial_no_answer") ||
+    r.includes("dial-no-answer") ||
+    r.includes("dial_busy") ||
+    r.includes("busy") ||
+    r.includes("no_answer") ||
+    r.includes("no-answer") ||
+    r.includes("not_connected") ||
+    r.includes("user_declined") ||
+    r.includes("declined") ||
+    r.includes("rejected")
+  );
+}
+
 function classifyEndStatus(call: Record<string, unknown>) {
   const callStatus = pickString(call.call_status)?.toLowerCase() ?? "";
   const disconnection = pickString(call.disconnection_reason)?.toLowerCase() ?? "";
-  const inVoicemail =
-    Boolean((call as { in_voicemail?: unknown }).in_voicemail) ||
-    Boolean((call as { call_analysis?: { in_voicemail?: unknown } }).call_analysis?.in_voicemail) ||
-    Boolean((call as { post_call_analysis?: { in_voicemail?: unknown } }).post_call_analysis?.in_voicemail);
+  const inVoicemail = getInVoicemail(call);
+  const callSuccessful = getCallSuccessful(call);
+  const durationMs = getDurationMs(call);
+  const { user: userUtterances } = getUserUtteranceCounts(call);
+  const spoke = userUtterances > 0;
 
   // "not_connected" is sometimes used for outbound calls that never connect.
   if (
@@ -45,7 +115,10 @@ function classifyEndStatus(call: Record<string, unknown>) {
     disconnection.includes("dial_no-answer") ||
     disconnection.includes("voicemail") ||
     disconnection.includes("dial_busy") ||
-    disconnection.includes("busy")
+    disconnection.includes("busy") ||
+    disconnection.includes("user_declined") ||
+    disconnection.includes("declined") ||
+    disconnection.includes("rejected")
   ) {
     return "no_answer";
   }
@@ -54,7 +127,15 @@ function classifyEndStatus(call: Record<string, unknown>) {
     return "failed";
   }
 
-  if (callStatus === "ended") return "completed";
+  // Retell can report call_status="ended" even when no one answered (e.g. voicemail/no-pickup).
+  // If there was no clear user/callee speech, treat it as no-answer and schedule a retry.
+  if (callStatus === "ended") {
+    if (!spoke) return "no_answer";
+    if (callSuccessful === false) return "no_answer";
+    // Very short calls without user speech are retries (already handled above), but keep a duration guard.
+    if (durationMs !== null && durationMs < 12_000) return "no_answer";
+    return "completed";
+  }
 
   // Fallback for unknown end statuses.
   return "ended";
@@ -126,24 +207,7 @@ function shouldScheduleCallback(opts: { transcript: string | null; summary: stri
 }
 
 function hasUserUtterance(call: Record<string, unknown>) {
-  const arrays: unknown[] = [
-    (call as { transcript_object?: unknown }).transcript_object,
-    (call as { transcript_with_tool_calls?: unknown }).transcript_with_tool_calls,
-  ];
-  for (const a of arrays) {
-    if (!Array.isArray(a)) continue;
-    for (const item of a) {
-      if (!item || typeof item !== "object") continue;
-      const obj = item as Record<string, unknown>;
-      const speaker = String(obj.speaker ?? obj.role ?? obj.from ?? "").toLowerCase();
-      // Common patterns: "user", "callee", "human"
-      if (speaker === "user" || speaker === "callee" || speaker === "human") return true;
-    }
-  }
-  // Fallback: transcript string that contains obvious user markers.
-  const transcript = String((call as { transcript?: unknown }).transcript ?? "");
-  if (/(\bUser\b|\bCandidate\b)/i.test(transcript)) return true;
-  return false;
+  return getUserUtteranceCounts(call).user > 0;
 }
 
 async function updateSessionRollup(sessionId: string, campaignId: string) {
@@ -250,6 +314,34 @@ export async function POST(request: Request) {
   const retellCallId = pickString(call.call_id);
   if (!retellCallId) return NextResponse.json({ error: "Missing call.call_id." }, { status: 400 });
 
+  // Safe debug logging (no transcript content).
+  try {
+    const disconnection = pickString(call.disconnection_reason);
+    const durationMs = getDurationMs(call);
+    const inVoicemail = getInVoicemail(call);
+    const callSuccessful = getCallSuccessful(call);
+    const utter = getUserUtteranceCounts(call);
+    const hasUser = utter.user > 0;
+    const transcriptLen = String((call as { transcript?: unknown }).transcript ?? "").length;
+    const transcriptObj = (call as { transcript_object?: unknown }).transcript_object;
+    const transcriptObjLen = Array.isArray(transcriptObj) ? transcriptObj.length : null;
+    console.log("[retell-webhook] payload summary", {
+      event,
+      call_id: retellCallId,
+      call_status: pickString(call.call_status),
+      disconnection_reason: disconnection,
+      duration_ms: durationMs,
+      in_voicemail: inVoicemail,
+      call_successful: callSuccessful,
+      has_user_utterance: hasUser,
+      utterances: utter,
+      transcript_length: transcriptLen,
+      transcript_object_length: transcriptObjLen,
+    });
+  } catch (e) {
+    console.warn("[retell-webhook] debug summary failed", e);
+  }
+
   const { data: candidateRow, error: candidateLoadError } = await supabase
     .from("campaign_call_candidates")
     .select("id,campaign_id,call_session_id,call_status,call_completed_at,attempt_count,max_attempts")
@@ -295,14 +387,20 @@ export async function POST(request: Request) {
   if (event === "call_ended") {
     const next = classifyEndStatus(call);
     if (next === "no_answer") {
+      const disconnection = pickString(call.disconnection_reason)?.toLowerCase() ?? "";
+      const voicemailDetected = getInVoicemail(call) || disconnection.includes("voicemail");
+      const rejected = disconnection.includes("user_declined") || disconnection.includes("declined") || disconnection.includes("rejected");
+      const retryReason = voicemailDetected ? "voicemail" : rejected ? "call_rejected" : "no_answer";
       if (attemptCount < maxAttempts) {
         update.call_status = "retry_scheduled";
-        update.retry_reason = "no_answer";
+        update.retry_reason = retryReason;
+        if (voicemailDetected) update.last_error = "voicemail_detected";
         update.next_retry_at = new Date(Date.now() + 30 * 60 * 1000).toISOString();
         update.call_completed_at = endAt;
       } else {
         update.call_status = "no_answer";
-        update.retry_reason = "no_answer";
+        update.retry_reason = retryReason;
+        if (voicemailDetected) update.last_error = "voicemail_detected";
         update.next_retry_at = null;
         update.call_completed_at = endAt;
       }
@@ -343,14 +441,11 @@ export async function POST(request: Request) {
   if (event === "call_analyzed") {
     const disconnection = pickString(call.disconnection_reason)?.toLowerCase() ?? "";
     const inVoicemail =
-      Boolean((call as { in_voicemail?: unknown }).in_voicemail) ||
-      Boolean((call as { call_analysis?: { in_voicemail?: unknown } }).call_analysis?.in_voicemail) ||
-      Boolean((call as { post_call_analysis?: { in_voicemail?: unknown } }).post_call_analysis?.in_voicemail);
+      getInVoicemail(call);
 
     const callbackRequested = shouldScheduleCallback({ transcript, summary: callSummary, candidateAnswers });
     const spoke = hasUserUtterance(call);
-    const noAnswerLike =
-      inVoicemail || disconnection.includes("voicemail") || disconnection.includes("dial_no_answer") || disconnection.includes("dial_busy") || disconnection.includes("dial_no");
+    const noAnswerLike = inVoicemail || isNoAnswerLikeDisconnection(disconnection);
 
     if (callbackRequested && spoke && !noAnswerLike && attemptCount < maxAttempts) {
       const { data: latestRow } = await supabase
