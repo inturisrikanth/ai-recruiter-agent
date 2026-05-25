@@ -96,6 +96,45 @@ function isNoAnswerLikeDisconnection(reason: string) {
   );
 }
 
+type NoAnswerKind = "voicemail" | "call_rejected" | "no_answer" | null;
+
+function deriveNoAnswerKind(opts: {
+  call: Record<string, unknown>;
+  disconnectionReasonRaw: string | null;
+  failureReasonRaw: string | null;
+}): { kind: NoAnswerKind } {
+  const { call, disconnectionReasonRaw, failureReasonRaw } = opts;
+  const inVoicemail = getInVoicemail(call);
+  const a = (disconnectionReasonRaw ?? "").toLowerCase();
+  const b = (failureReasonRaw ?? "").toLowerCase();
+  const combined = [a, b].filter(Boolean).join(" | ");
+
+  const voicemail =
+    inVoicemail ||
+    combined.includes("voicemail_reached") ||
+    combined.includes("voicemail");
+
+  const rejected =
+    combined.includes("user_declined") ||
+    combined.includes("declined") ||
+    combined.includes("rejected");
+
+  const noAnswerLike =
+    voicemail ||
+    combined.includes("dial_no_answer") ||
+    combined.includes("dial-no-answer") ||
+    combined.includes("dial_busy") ||
+    combined.includes("busy") ||
+    combined.includes("no_answer") ||
+    combined.includes("no-answer") ||
+    combined.includes("not_connected");
+
+  if (voicemail) return { kind: "voicemail" };
+  if (rejected) return { kind: "call_rejected" };
+  if (noAnswerLike) return { kind: "no_answer" };
+  return { kind: null };
+}
+
 function classifyEndStatus(call: Record<string, unknown>) {
   const callStatus = pickString(call.call_status)?.toLowerCase() ?? "";
   const disconnection = pickString(call.disconnection_reason)?.toLowerCase() ?? "";
@@ -379,18 +418,25 @@ export async function POST(request: Request) {
   if (candidateAnswers) update.candidate_answers = candidateAnswers;
   if (interestStatus) update.interest_status = interestStatus;
 
-  const failureReason = pickString(call.disconnection_reason) ?? pickString((call as { error?: unknown }).error);
+  const disconnectionReason = pickString(call.disconnection_reason);
+  const failureReason = disconnectionReason ?? pickString((call as { error?: unknown }).error);
   if (failureReason && (event === "call_ended" || retellCallStatus === "error" || retellCallStatus === "not_connected")) {
     update.last_error = failureReason;
   }
 
   if (event === "call_ended") {
-    const next = classifyEndStatus(call);
+    // First classify based on call fields.
+    let next = classifyEndStatus(call);
+
+    // FINAL GUARD: if the provider signaled voicemail/no-answer/decline anywhere (including error/last_error),
+    // force no_answer classification even when call_status="ended".
+    const signal = deriveNoAnswerKind({ call, disconnectionReasonRaw: disconnectionReason, failureReasonRaw: failureReason });
+    if (signal.kind) next = "no_answer";
+
     if (next === "no_answer") {
-      const disconnection = pickString(call.disconnection_reason)?.toLowerCase() ?? "";
-      const voicemailDetected = getInVoicemail(call) || disconnection.includes("voicemail");
-      const rejected = disconnection.includes("user_declined") || disconnection.includes("declined") || disconnection.includes("rejected");
-      const retryReason = voicemailDetected ? "voicemail" : rejected ? "call_rejected" : "no_answer";
+      const retryReason = signal.kind ?? "no_answer";
+      const voicemailDetected = retryReason === "voicemail";
+
       if (attemptCount < maxAttempts) {
         update.call_status = "retry_scheduled";
         update.retry_reason = retryReason;
@@ -413,7 +459,30 @@ export async function POST(request: Request) {
   } else if (event === "call_analyzed") {
     // Analysis arrives after end; ensure completion timestamp is set if missing.
     const current = String(candidateRow.call_status ?? "").toLowerCase();
-    if (current === "calling" || current === "running" || current === "in_progress") {
+    const signal = deriveNoAnswerKind({ call, disconnectionReasonRaw: disconnectionReason, failureReasonRaw: failureReason });
+    if (signal.kind) {
+      // Never overwrite a voicemail/no-answer/declined signal into completed.
+      // If the row is still marked calling, schedule retry.
+      if (current === "calling" || current === "running" || current === "in_progress") {
+        const retryReason = signal.kind;
+        const voicemailDetected = retryReason === "voicemail";
+        if (attemptCount < maxAttempts) {
+          update.call_status = "retry_scheduled";
+          update.retry_reason = retryReason;
+          if (voicemailDetected) update.last_error = "voicemail_detected";
+          update.next_retry_at = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+          update.call_completed_at = endAt;
+        } else {
+          update.call_status = "no_answer";
+          update.retry_reason = retryReason;
+          if (voicemailDetected) update.last_error = "voicemail_detected";
+          update.next_retry_at = null;
+          update.call_completed_at = endAt;
+        }
+      } else if (!pickString((candidateRow as { call_completed_at?: unknown }).call_completed_at)) {
+        update.call_completed_at = endAt;
+      }
+    } else if (current === "calling" || current === "running" || current === "in_progress") {
       update.call_status = "completed";
       update.call_completed_at = endAt;
     } else if (!pickString((candidateRow as { call_completed_at?: unknown }).call_completed_at)) {
@@ -439,13 +508,12 @@ export async function POST(request: Request) {
   // Callback scheduling: only when the candidate actually spoke and requested a callback.
   // Never schedule callback for voicemail/no-answer outcomes.
   if (event === "call_analyzed") {
-    const disconnection = pickString(call.disconnection_reason)?.toLowerCase() ?? "";
-    const inVoicemail =
-      getInVoicemail(call);
+    const disconnection = (disconnectionReason ?? "").toLowerCase();
+    const inVoicemail = getInVoicemail(call);
 
     const callbackRequested = shouldScheduleCallback({ transcript, summary: callSummary, candidateAnswers });
     const spoke = hasUserUtterance(call);
-    const noAnswerLike = inVoicemail || isNoAnswerLikeDisconnection(disconnection);
+    const noAnswerLike = inVoicemail || isNoAnswerLikeDisconnection(disconnection) || Boolean(deriveNoAnswerKind({ call, disconnectionReasonRaw: disconnectionReason, failureReasonRaw: failureReason }).kind);
 
     if (callbackRequested && spoke && !noAnswerLike && attemptCount < maxAttempts) {
       const { data: latestRow } = await supabase
