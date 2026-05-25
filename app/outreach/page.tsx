@@ -397,7 +397,9 @@ export default async function OutreachPage({
   const { data: candidateRows, error: candidateLoadError } = sessionId
     ? await supabase
         .from("campaign_call_candidates")
-        .select("id,candidate_name,candidate_phone,candidate_email,call_status,updated_at,created_at")
+        .select(
+          "id,candidate_name,candidate_phone,candidate_email,call_status,retell_call_id,retell_call_status,call_started_at,last_error,updated_at,created_at",
+        )
         .eq("call_session_id", sessionId)
         .order("candidate_name", { ascending: true })
         .limit(5000)
@@ -570,6 +572,8 @@ export default async function OutreachPage({
                       <th className="px-4 py-3">Phone</th>
                       <th className="px-4 py-3">Email</th>
                       <th className="px-4 py-3">Call status</th>
+                      <th className="px-4 py-3">Retell</th>
+                      <th className="px-4 py-3">Last error</th>
                       <th className="px-4 py-3">Last updated</th>
                     </tr>
                   </thead>
@@ -578,6 +582,10 @@ export default async function OutreachPage({
                       (candidateRows ?? []).map((c) => {
                         const status = String(c.call_status ?? "");
                         const updated = String(c.updated_at ?? c.created_at ?? "");
+                        const retellCallId = String((c as { retell_call_id?: unknown }).retell_call_id ?? "");
+                        const retellStatus = String((c as { retell_call_status?: unknown }).retell_call_status ?? "");
+                        const startedAt = String((c as { call_started_at?: unknown }).call_started_at ?? "");
+                        const lastError = String((c as { last_error?: unknown }).last_error ?? "");
                         return (
                           <tr key={String(c.id)} className="hover:bg-zinc-50/60">
                             <td className="px-4 py-3 font-medium text-zinc-900">{String(c.candidate_name ?? "") || "—"}</td>
@@ -593,13 +601,33 @@ export default async function OutreachPage({
                                 {callSessionLabel(status)}
                               </span>
                             </td>
+                            <td className="px-4 py-3 text-zinc-700">
+                              {retellCallId ? (
+                                <div className="space-y-1">
+                                  <div className="font-medium text-zinc-900">{retellStatus || "registered"}</div>
+                                  <div className="text-xs text-zinc-500">{retellCallId}</div>
+                                  {startedAt ? <div className="text-xs text-zinc-500">{formatDateTime(startedAt)}</div> : null}
+                                </div>
+                              ) : (
+                                <span className="text-sm text-zinc-500">—</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-zinc-700">
+                              {lastError ? (
+                                <span className="block max-w-[28rem] truncate text-sm text-rose-700" title={lastError}>
+                                  {lastError}
+                                </span>
+                              ) : (
+                                <span className="text-sm text-zinc-500">—</span>
+                              )}
+                            </td>
                             <td className="px-4 py-3 text-zinc-700">{updated ? formatDateTime(updated) : "—"}</td>
                           </tr>
                         );
                       })
                     ) : (
                       <tr>
-                        <td colSpan={5} className="px-4 py-10 text-center">
+                        <td colSpan={7} className="px-4 py-10 text-center">
                           <div className="text-sm font-semibold text-zinc-900">No candidates</div>
                           <div className="mt-1 text-sm text-zinc-600">This session doesn’t have any queued candidates yet.</div>
                         </td>
