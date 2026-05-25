@@ -1,0 +1,9 @@
+{
+  "crons": [
+    {
+      "path": "/api/outreach/process-retries",
+      "schedule": "*/1 * * * *"
+    }
+  ]
+}
+
