@@ -3,6 +3,12 @@ export type RetellCreatePhoneCallRequest = {
   to_number: string;
   override_agent_id: string;
   retell_llm_dynamic_variables?: Record<string, string>;
+  agent_override?: {
+    retell_llm?: {
+      begin_message?: string | null;
+      begin_after_user_silence_ms?: number | null;
+    };
+  };
   metadata?: Record<string, unknown>;
 };
 
@@ -31,7 +37,9 @@ function safeJsonParse(text: string): unknown {
   }
 }
 
-export async function retellCreatePhoneCall(input: Omit<RetellCreatePhoneCallRequest, "override_agent_id"> & { override_agent_id?: string }) {
+export async function retellCreatePhoneCall(
+  input: Omit<RetellCreatePhoneCallRequest, "override_agent_id"> & { override_agent_id?: string },
+) {
   const apiKey = requiredEnv("RETELL_API_KEY");
   const overrideAgentId = input.override_agent_id ?? requiredEnv("RETELL_AGENT_ID");
 
@@ -40,6 +48,7 @@ export async function retellCreatePhoneCall(input: Omit<RetellCreatePhoneCallReq
     to_number: input.to_number,
     override_agent_id: overrideAgentId,
     retell_llm_dynamic_variables: input.retell_llm_dynamic_variables,
+    agent_override: input.agent_override,
     metadata: input.metadata,
   };
 

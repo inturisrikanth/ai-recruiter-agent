@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
+import { startNextQueuedCall } from "@/lib/outreach/startNextQueuedCall";
 import { verifyRetellWebhookSignature } from "@/lib/retell/verifyWebhookSignature";
 import { NextResponse } from "next/server";
 
@@ -79,32 +80,64 @@ function extractInterestStatus(call: Record<string, unknown>) {
 }
 
 async function updateSessionRollup(sessionId: string, campaignId: string) {
-  // Keep this lightweight: determine whether session is still running, queued, or completed.
-  const { data: counts, error } = await supabase
-    .from("campaign_call_candidates")
-    .select("call_status", { count: "exact" })
-    .eq("call_session_id", sessionId)
-    .limit(50000);
+  // Keep this lightweight: determine whether session is still active or completed.
+  // We avoid flipping paused/stopped sessions back to running.
+  const { data: sessionRow, error: sessionError } = await supabase
+    .from("campaign_call_sessions")
+    .select("status")
+    .eq("id", sessionId)
+    .maybeSingle();
+  if (sessionError) return;
 
-  if (error) return;
+  const currentStatus = String(sessionRow?.status ?? "").toLowerCase();
+  if (currentStatus === "paused" || currentStatus === "stopped") return;
 
-  let queued = 0;
-  let calling = 0;
+  const [{ count: queuedCount, error: queuedErr }, { count: callingCount, error: callingErr }] = await Promise.all([
+    supabase
+      .from("campaign_call_candidates")
+      .select("id", { count: "exact", head: true })
+      .eq("call_session_id", sessionId)
+      .eq("call_status", "queued"),
+    supabase
+      .from("campaign_call_candidates")
+      .select("id", { count: "exact", head: true })
+      .eq("call_session_id", sessionId)
+      .in("call_status", ["calling", "running", "in_progress"]),
+  ]);
 
-  for (const r of (counts ?? []) as Array<{ call_status: unknown }>) {
-    const s = String(r.call_status ?? "").toLowerCase().replace(/\s+/g, "_");
-    if (s === "queued") queued += 1;
-    else if (s === "calling" || s === "running" || s === "in_progress" || s === "in-progress") calling += 1;
-  }
+  if (queuedErr || callingErr) return;
+
+  const queued = Number(queuedCount ?? 0);
+  const calling = Number(callingCount ?? 0);
 
   const now = new Date().toISOString();
-  const nextSessionStatus = calling > 0 ? "running" : queued > 0 ? "queued" : "completed";
+  // For sequential outbound calling, treat "queued" candidates as an active session.
+  const nextSessionStatus = calling > 0 || queued > 0 ? "running" : "completed";
 
   await supabase.from("campaign_call_sessions").update({ status: nextSessionStatus, updated_at: now }).eq("id", sessionId);
 
   if (nextSessionStatus === "completed") {
     // Best-effort campaign completion signal.
     await supabase.from("campaigns").update({ status: "Completed", updated_at: now }).eq("id", campaignId);
+  }
+}
+
+async function tryAutoAdvance(opts: { campaignId: string; sessionId: string; sessionStatus: string }) {
+  const { campaignId, sessionId, sessionStatus } = opts;
+  const status = sessionStatus.toLowerCase();
+  if (status === "paused" || status === "stopped" || status === "completed") return;
+
+  // Retry briefly in case the just-finished call row is still visible as "calling" in a concurrent read.
+  const waits = [0, 350, 900];
+  for (let i = 0; i < waits.length; i += 1) {
+    const waitMs = waits[i] ?? 0;
+    if (waitMs) await new Promise((r) => setTimeout(r, waitMs));
+    const result = await startNextQueuedCall({ campaignId, sessionId });
+    console.log("[retell-webhook] auto-advance attempt", { i, result });
+    if (result.started) return;
+    if (result.reason === "no_queued_candidates" || result.reason === "paused_or_stopped") return;
+    if (result.reason === "retell_failed") return;
+    // else: already_calling -> retry after short delay
   }
 }
 
@@ -219,6 +252,23 @@ export async function POST(request: Request) {
     const campaignId = String(candidateRow.campaign_id ?? "");
     if (sessionId && campaignId) {
       await updateSessionRollup(sessionId, campaignId);
+    }
+  }
+
+  // MVP sequential calling: after a call ends, automatically start the next queued candidate
+  // if the session is still active (not paused/stopped/completed).
+  if (event === "call_ended" || event === "call_analyzed") {
+    const sessionId = String(candidateRow.call_session_id ?? "");
+    const campaignId = String(candidateRow.campaign_id ?? "");
+    if (sessionId && campaignId) {
+      const { data: sessionRow } = await supabase
+        .from("campaign_call_sessions")
+        .select("status")
+        .eq("id", sessionId)
+        .maybeSingle();
+      const status = String(sessionRow?.status ?? "").toLowerCase();
+      console.log("[retell-webhook] auto-advance check", { campaignId, sessionId, status, event });
+      await tryAutoAdvance({ campaignId, sessionId, sessionStatus: status });
     }
   }
 

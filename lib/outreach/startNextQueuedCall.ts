@@ -1,0 +1,233 @@
+import { supabase } from "@/lib/supabaseClient";
+import { buildRecruiterDynamicVariables } from "@/lib/retell/buildRecruiterDynamicVariables";
+import { retellCreatePhoneCall } from "@/lib/retell/retellClient";
+
+function isE164(value: string) {
+  return /^\+[1-9]\d{1,14}$/.test(value);
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function pickFirstQuestion(selectedQuestions: string[], customQuestions: string[]) {
+  const all = [...selectedQuestions, ...customQuestions].map((q) => q.trim()).filter(Boolean);
+  return all[0] ?? null;
+}
+
+function buildBeginMessage(input: {
+  candidateName: string | null;
+  companyName: string | null;
+  jobTitle: string | null;
+  firstQuestion: string | null;
+}) {
+  const name = input.candidateName?.trim() ? input.candidateName.trim() : null;
+  const company = input.companyName?.trim() ? input.companyName.trim() : null;
+  const job = input.jobTitle?.trim() ? input.jobTitle.trim() : null;
+  const firstQ = input.firstQuestion?.trim() ? input.firstQuestion.trim() : null;
+
+  const greeting = name ? `Hi ${name},` : "Hi there,";
+
+  let intro = "this is an AI recruiting assistant";
+  if (company) intro += ` calling from ${company}`;
+  if (job) intro += ` about a ${job} opportunity`;
+  else intro += " about an open role";
+  intro += ".";
+
+  const purpose = "We’re reaching out to share a quick overview and ask a few screening questions—no pressure.";
+  const consent = "Do you have a few minutes to chat now?";
+  const q = firstQ ? `If now works, I’ll start with the first question: ${firstQ}` : null;
+
+  return [greeting, intro, purpose, consent, q].filter(Boolean).join(" ");
+}
+
+export type StartNextCallResult =
+  | { started: true; candidateRowId: string; retellCallId: string; retellCallStatus: string | null }
+  | { started: false; reason: "already_calling" | "no_queued_candidates" | "paused_or_stopped" | "no_active_session" | "retell_failed" };
+
+export async function startNextQueuedCall(opts: { campaignId: string; sessionId: string }): Promise<StartNextCallResult> {
+  const { campaignId, sessionId } = opts;
+
+  // Safety: never run concurrent outbound calls for a session.
+  const { count: activeCount, error: activeCountError } = await supabase
+    .from("campaign_call_candidates")
+    .select("id", { count: "exact", head: true })
+    .eq("call_session_id", sessionId)
+    .in("call_status", ["calling", "running", "in_progress"]);
+
+  if (activeCountError) return { started: false, reason: "retell_failed" };
+  if (Number(activeCount ?? 0) > 0) return { started: false, reason: "already_calling" };
+
+  const { data: sessionRow, error: sessionLoadError } = await supabase
+    .from("campaign_call_sessions")
+    .select("id,status")
+    .eq("id", sessionId)
+    .maybeSingle();
+
+  if (sessionLoadError) return { started: false, reason: "retell_failed" };
+  if (!sessionRow?.id) return { started: false, reason: "no_active_session" };
+
+  const sessionStatus = String(sessionRow.status ?? "").toLowerCase();
+  if (sessionStatus === "paused" || sessionStatus === "stopped" || sessionStatus === "completed") {
+    return { started: false, reason: "paused_or_stopped" };
+  }
+
+  const { data: campaignRow, error: campaignLoadError } = await supabase
+    .from("campaigns")
+    .select("campaign_name,job_title,job_description,employment_type,required_skills")
+    .eq("id", campaignId)
+    .maybeSingle();
+
+  if (campaignLoadError) return { started: false, reason: "retell_failed" };
+
+  const { data: callConfigRow } = await supabase
+    .from("call_configurations")
+    .select("company_name,selected_questions,custom_questions,call_notes")
+    .eq("campaign_id", campaignId)
+    .maybeSingle();
+
+  const companyName = String(callConfigRow?.company_name ?? "").trim() || null;
+  const selectedQuestions = Array.isArray(callConfigRow?.selected_questions)
+    ? callConfigRow?.selected_questions.map((q: unknown) => String(q ?? "").trim()).filter(Boolean)
+    : [];
+  const customQuestions = Array.isArray(callConfigRow?.custom_questions)
+    ? callConfigRow?.custom_questions.map((q: unknown) => String(q ?? "").trim()).filter(Boolean)
+    : [];
+  const callNotes = String(callConfigRow?.call_notes ?? "").trim() || null;
+
+  for (let i = 0; i < 25; i += 1) {
+    const { data: queued, error: queuedError } = await supabase
+      .from("campaign_call_candidates")
+      .select("id,candidate_id,candidate_name,candidate_phone,attempt_count,created_at")
+      .eq("call_session_id", sessionId)
+      .eq("call_status", "queued")
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (queuedError) return { started: false, reason: "retell_failed" };
+    if (!queued?.id) return { started: false, reason: "no_queued_candidates" };
+
+    const candidateRowId = String(queued.id);
+    const candidateName = String(queued.candidate_name ?? "").trim() || null;
+    const rawPhone = String(queued.candidate_phone ?? "").trim();
+
+    const attemptCount = Number((queued as { attempt_count?: unknown }).attempt_count ?? 0);
+    const attemptAt = nowIso();
+
+    if (!rawPhone || !isE164(rawPhone)) {
+      const message = rawPhone ? `Invalid phone number (expected E.164): ${rawPhone}` : "Missing phone number";
+      await supabase
+        .from("campaign_call_candidates")
+        .update({
+          call_status: "failed",
+          last_error: message,
+          retell_call_status: null,
+          attempt_count: attemptCount + 1,
+          last_attempt_at: attemptAt,
+          call_completed_at: attemptAt,
+          updated_at: attemptAt,
+        })
+        .eq("id", candidateRowId);
+      continue;
+    }
+
+    const preMarkAt = nowIso();
+    const { data: updatedRow, error: preMarkError } = await supabase
+      .from("campaign_call_candidates")
+      .update({
+        call_status: "calling",
+        last_error: null,
+        attempt_count: attemptCount + 1,
+        last_attempt_at: preMarkAt,
+        call_started_at: preMarkAt,
+        updated_at: preMarkAt,
+      })
+      .eq("id", candidateRowId)
+      .eq("call_status", "queued")
+      .select("id")
+      .maybeSingle();
+
+    if (preMarkError || !updatedRow?.id) return { started: false, reason: "already_calling" };
+
+    try {
+      const fromNumber = process.env.RETELL_PHONE_NUMBER;
+      const overrideAgentId = process.env.RETELL_AGENT_ID;
+      if (!fromNumber) throw new Error("Missing RETELL_PHONE_NUMBER.");
+      if (!overrideAgentId) throw new Error("Missing RETELL_AGENT_ID.");
+
+      const jobTitle = campaignRow ? String((campaignRow as { job_title?: unknown }).job_title ?? "").trim() || null : null;
+      const firstQuestion = pickFirstQuestion(selectedQuestions, customQuestions);
+      const beginMessage = buildBeginMessage({ candidateName, companyName, jobTitle, firstQuestion });
+
+      const dynamicVars = buildRecruiterDynamicVariables({
+        campaignName: campaignRow ? String((campaignRow as { campaign_name?: unknown }).campaign_name ?? "").trim() || null : null,
+        jobTitle,
+        jobDescription: campaignRow ? String((campaignRow as { job_description?: unknown }).job_description ?? "").trim() || null : null,
+        employmentType: campaignRow ? String((campaignRow as { employment_type?: unknown }).employment_type ?? "").trim() || null : null,
+        requiredSkills: campaignRow ? String((campaignRow as { required_skills?: unknown }).required_skills ?? "").trim() || null : null,
+        companyName,
+        selectedQuestions,
+        customQuestions,
+        callNotes,
+        candidateName,
+      });
+
+      const retellRes = await retellCreatePhoneCall({
+        from_number: fromNumber,
+        to_number: rawPhone,
+        override_agent_id: overrideAgentId,
+        retell_llm_dynamic_variables: dynamicVars,
+        agent_override: {
+          retell_llm: {
+            begin_message: beginMessage,
+          },
+        },
+        metadata: {
+          campaign_id: campaignId,
+          call_session_id: sessionId,
+          campaign_call_candidate_id: candidateRowId,
+          candidate_id: String(queued.candidate_id ?? ""),
+        },
+      });
+
+      const afterAt = nowIso();
+      await Promise.all([
+        supabase
+          .from("campaign_call_candidates")
+          .update({
+            retell_call_id: String(retellRes.call_id),
+            retell_call_status: String(retellRes.call_status ?? "registered"),
+            last_error: null,
+            updated_at: afterAt,
+          })
+          .eq("id", candidateRowId),
+        supabase.from("campaign_call_sessions").update({ status: "running", updated_at: afterAt }).eq("id", sessionId),
+      ]);
+
+      return {
+        started: true,
+        candidateRowId,
+        retellCallId: String(retellRes.call_id),
+        retellCallStatus: retellRes.call_status ? String(retellRes.call_status) : null,
+      };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Retell call failed.";
+      const failAt = nowIso();
+      await supabase
+        .from("campaign_call_candidates")
+        .update({
+          call_status: "failed",
+          retell_call_status: "error",
+          last_error: message,
+          call_completed_at: failAt,
+          updated_at: failAt,
+        })
+        .eq("id", candidateRowId);
+      return { started: false, reason: "retell_failed" };
+    }
+  }
+
+  return { started: false, reason: "no_queued_candidates" };
+}
+
