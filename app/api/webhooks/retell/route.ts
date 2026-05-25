@@ -30,9 +30,23 @@ function pickString(value: unknown) {
 function classifyEndStatus(call: Record<string, unknown>) {
   const callStatus = pickString(call.call_status)?.toLowerCase() ?? "";
   const disconnection = pickString(call.disconnection_reason)?.toLowerCase() ?? "";
+  const inVoicemail =
+    Boolean((call as { in_voicemail?: unknown }).in_voicemail) ||
+    Boolean((call as { call_analysis?: { in_voicemail?: unknown } }).call_analysis?.in_voicemail) ||
+    Boolean((call as { post_call_analysis?: { in_voicemail?: unknown } }).post_call_analysis?.in_voicemail);
 
   // "not_connected" is sometimes used for outbound calls that never connect.
-  if (callStatus === "not_connected" || disconnection.includes("no_answer") || disconnection.includes("no-answer")) {
+  if (
+    callStatus === "not_connected" ||
+    inVoicemail ||
+    disconnection.includes("no_answer") ||
+    disconnection.includes("no-answer") ||
+    disconnection.includes("dial_no_answer") ||
+    disconnection.includes("dial_no-answer") ||
+    disconnection.includes("voicemail") ||
+    disconnection.includes("dial_busy") ||
+    disconnection.includes("busy")
+  ) {
     return "no_answer";
   }
 
@@ -111,6 +125,27 @@ function shouldScheduleCallback(opts: { transcript: string | null; summary: stri
   return false;
 }
 
+function hasUserUtterance(call: Record<string, unknown>) {
+  const arrays: unknown[] = [
+    (call as { transcript_object?: unknown }).transcript_object,
+    (call as { transcript_with_tool_calls?: unknown }).transcript_with_tool_calls,
+  ];
+  for (const a of arrays) {
+    if (!Array.isArray(a)) continue;
+    for (const item of a) {
+      if (!item || typeof item !== "object") continue;
+      const obj = item as Record<string, unknown>;
+      const speaker = String(obj.speaker ?? obj.role ?? obj.from ?? "").toLowerCase();
+      // Common patterns: "user", "callee", "human"
+      if (speaker === "user" || speaker === "callee" || speaker === "human") return true;
+    }
+  }
+  // Fallback: transcript string that contains obvious user markers.
+  const transcript = String((call as { transcript?: unknown }).transcript ?? "");
+  if (/(\bUser\b|\bCandidate\b)/i.test(transcript)) return true;
+  return false;
+}
+
 async function updateSessionRollup(sessionId: string, campaignId: string) {
   // Keep this lightweight: determine whether session is still active or completed.
   // We avoid flipping paused/stopped sessions back to running.
@@ -141,10 +176,17 @@ async function updateSessionRollup(sessionId: string, campaignId: string) {
 
   const queued = Number(queuedCount ?? 0);
   const calling = Number(callingCount ?? 0);
+  const { count: scheduledCount, error: scheduledErr } = await supabase
+    .from("campaign_call_candidates")
+    .select("id", { count: "exact", head: true })
+    .eq("call_session_id", sessionId)
+    .in("call_status", ["retry_scheduled", "callback_scheduled"]);
+  if (scheduledErr) return;
+  const scheduled = Number(scheduledCount ?? 0);
 
   const now = new Date().toISOString();
   // For sequential outbound calling, treat "queued" candidates as an active session.
-  const nextSessionStatus = calling > 0 || queued > 0 ? "running" : "completed";
+  const nextSessionStatus = calling > 0 || queued > 0 || scheduled > 0 ? "running" : "completed";
 
   await supabase.from("campaign_call_sessions").update({ status: nextSessionStatus, updated_at: now }).eq("id", sessionId);
 
@@ -296,11 +338,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Database update failed." }, { status: 500 });
   }
 
-  // Callback scheduling: best-effort classification after we have transcript/summary/extracted data.
-  // Only schedule if we are not already scheduling a retry, and if attempts remain.
+  // Callback scheduling: only when the candidate actually spoke and requested a callback.
+  // Never schedule callback for voicemail/no-answer outcomes.
   if (event === "call_analyzed") {
+    const disconnection = pickString(call.disconnection_reason)?.toLowerCase() ?? "";
+    const inVoicemail =
+      Boolean((call as { in_voicemail?: unknown }).in_voicemail) ||
+      Boolean((call as { call_analysis?: { in_voicemail?: unknown } }).call_analysis?.in_voicemail) ||
+      Boolean((call as { post_call_analysis?: { in_voicemail?: unknown } }).post_call_analysis?.in_voicemail);
+
     const callbackRequested = shouldScheduleCallback({ transcript, summary: callSummary, candidateAnswers });
-    if (callbackRequested && attemptCount < maxAttempts) {
+    const spoke = hasUserUtterance(call);
+    const noAnswerLike =
+      inVoicemail || disconnection.includes("voicemail") || disconnection.includes("dial_no_answer") || disconnection.includes("dial_busy") || disconnection.includes("dial_no");
+
+    if (callbackRequested && spoke && !noAnswerLike && attemptCount < maxAttempts) {
       const { data: latestRow } = await supabase
         .from("campaign_call_candidates")
         .select("call_status")

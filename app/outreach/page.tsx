@@ -589,7 +589,14 @@ export default async function OutreachPage({
             </div>
           ) : (
             <div className="mt-5 overflow-hidden rounded-3xl ring-1 ring-zinc-200/70">
-              <div className="overflow-x-auto">
+              <div className="border-b border-zinc-200/70 bg-zinc-50 px-4 py-3 text-xs font-medium text-zinc-600">
+                Tip: scroll right to view retry fields and actions.
+              </div>
+              <div className="relative overflow-x-auto">
+                <div
+                  className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-white to-white/0"
+                  aria-hidden="true"
+                />
                 <table className="min-w-full text-left text-sm">
                   <thead className="bg-zinc-50 text-xs font-semibold uppercase tracking-wide text-zinc-500">
                     <tr>
