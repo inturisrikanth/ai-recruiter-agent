@@ -79,6 +79,38 @@ function extractInterestStatus(call: Record<string, unknown>) {
   return pickString(direct ?? nested);
 }
 
+function textIndicatesCallbackRequested(text: string) {
+  const t = text.toLowerCase();
+  const phrases = [
+    "call back",
+    "callback",
+    "call me back",
+    "can you call back",
+    "call later",
+    "later today",
+    "later this",
+    "not now",
+    "busy",
+    "in a meeting",
+    "driving",
+    "can't talk",
+    "cannot talk",
+    "reach me later",
+    "another time",
+  ];
+  return phrases.some((p) => t.includes(p));
+}
+
+function shouldScheduleCallback(opts: { transcript: string | null; summary: string | null; candidateAnswers: unknown }) {
+  const parts = [opts.transcript ?? "", opts.summary ?? ""].join("\n").trim();
+  if (parts && textIndicatesCallbackRequested(parts)) return true;
+  if (opts.candidateAnswers && typeof opts.candidateAnswers === "object") {
+    const blob = JSON.stringify(opts.candidateAnswers).toLowerCase();
+    if (textIndicatesCallbackRequested(blob)) return true;
+  }
+  return false;
+}
+
 async function updateSessionRollup(sessionId: string, campaignId: string) {
   // Keep this lightweight: determine whether session is still active or completed.
   // We avoid flipping paused/stopped sessions back to running.
@@ -178,7 +210,7 @@ export async function POST(request: Request) {
 
   const { data: candidateRow, error: candidateLoadError } = await supabase
     .from("campaign_call_candidates")
-    .select("id,campaign_id,call_session_id,call_status,call_completed_at")
+    .select("id,campaign_id,call_session_id,call_status,call_completed_at,attempt_count,max_attempts")
     .eq("retell_call_id", retellCallId)
     .maybeSingle();
 
@@ -200,6 +232,8 @@ export async function POST(request: Request) {
   const candidateAnswers = extractCandidateAnswers(call);
   const interestStatus = extractInterestStatus(call);
   const endAt = msToIso(call.end_timestamp) ?? now;
+  const attemptCount = Number((candidateRow as { attempt_count?: unknown }).attempt_count ?? 0);
+  const maxAttempts = Number((candidateRow as { max_attempts?: unknown }).max_attempts ?? 3);
 
   const update: Record<string, unknown> = {
     retell_call_status: retellCallStatus,
@@ -218,8 +252,24 @@ export async function POST(request: Request) {
 
   if (event === "call_ended") {
     const next = classifyEndStatus(call);
-    update.call_status = next;
-    update.call_completed_at = endAt;
+    if (next === "no_answer") {
+      if (attemptCount < maxAttempts) {
+        update.call_status = "retry_scheduled";
+        update.retry_reason = "no_answer";
+        update.next_retry_at = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+        update.call_completed_at = endAt;
+      } else {
+        update.call_status = "no_answer";
+        update.retry_reason = "no_answer";
+        update.next_retry_at = null;
+        update.call_completed_at = endAt;
+      }
+    } else {
+      update.call_status = next;
+      update.next_retry_at = null;
+      update.retry_reason = null;
+      update.call_completed_at = endAt;
+    }
   } else if (event === "call_analyzed") {
     // Analysis arrives after end; ensure completion timestamp is set if missing.
     const current = String(candidateRow.call_status ?? "").toLowerCase();
@@ -244,6 +294,31 @@ export async function POST(request: Request) {
   if (updateError) {
     console.error("[retell-webhook] supabase update error:", updateError.message);
     return NextResponse.json({ error: "Database update failed." }, { status: 500 });
+  }
+
+  // Callback scheduling: best-effort classification after we have transcript/summary/extracted data.
+  // Only schedule if we are not already scheduling a retry, and if attempts remain.
+  if (event === "call_analyzed") {
+    const callbackRequested = shouldScheduleCallback({ transcript, summary: callSummary, candidateAnswers });
+    if (callbackRequested && attemptCount < maxAttempts) {
+      const { data: latestRow } = await supabase
+        .from("campaign_call_candidates")
+        .select("call_status")
+        .eq("id", String(candidateRow.id))
+        .maybeSingle();
+      const s = String(latestRow?.call_status ?? "").toLowerCase();
+      if (s === "completed" || s === "ended") {
+        await supabase
+          .from("campaign_call_candidates")
+          .update({
+            call_status: "callback_scheduled",
+            retry_reason: "callback_requested",
+            next_retry_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", String(candidateRow.id));
+      }
+    }
   }
 
   // Roll up session/campaign status for Outreach. Only do this after end/analyzed.

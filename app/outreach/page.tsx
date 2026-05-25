@@ -1,6 +1,7 @@
 import { AppShell } from "@/components/dashboard/AppShell";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { OutreachControls } from "@/components/outreach/OutreachControls";
+import { RetryNowButton } from "@/components/outreach/RetryNowButton";
 import { supabase } from "@/lib/supabaseClient";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -57,6 +58,8 @@ function classifyCallStatus(value: unknown) {
   const norm = raw.toLowerCase().replace(/\s+/g, "_");
 
   if (norm === "queued") return "queued";
+  if (norm === "retry_scheduled") return "retry_scheduled";
+  if (norm === "callback_scheduled") return "callback_scheduled";
   if (norm === "calling" || norm === "running" || norm === "in_progress" || norm === "in-progress") return "calling";
   if (norm === "completed" || norm === "done") return "completed";
   if (norm === "failed" || norm === "no_answer" || norm === "no-answer" || norm === "noanswer") return "failed";
@@ -393,12 +396,13 @@ export default async function OutreachPage({
   const sessionStatus = String(callSession?.status ?? "");
   const totalCandidates = Number(callSession?.total_candidates ?? 0);
   const isStopped = sessionStatus.toLowerCase() === "stopped";
+  const isPaused = sessionStatus.toLowerCase() === "paused";
 
   const { data: candidateRows, error: candidateLoadError } = sessionId
     ? await supabase
         .from("campaign_call_candidates")
         .select(
-          "id,candidate_name,candidate_phone,candidate_email,call_status,retell_call_id,retell_call_status,call_started_at,last_error,updated_at,created_at",
+          "id,candidate_name,candidate_phone,candidate_email,call_status,retell_call_id,retell_call_status,call_started_at,call_completed_at,last_error,attempt_count,max_attempts,next_retry_at,retry_reason,updated_at,created_at",
         )
         .eq("call_session_id", sessionId)
         .order("candidate_name", { ascending: true })
@@ -406,6 +410,8 @@ export default async function OutreachPage({
     : { data: null, error: null };
 
   let queuedCount = 0;
+  let retryScheduledCount = 0;
+  let callbackScheduledCount = 0;
   let callingCount = 0;
   let completedCount = 0;
   let failedCount = 0;
@@ -413,6 +419,8 @@ export default async function OutreachPage({
   for (const r of (candidateRows ?? []) as Array<{ call_status: unknown }>) {
     const kind = classifyCallStatus(r.call_status);
     if (kind === "queued") queuedCount += 1;
+    else if (kind === "retry_scheduled") retryScheduledCount += 1;
+    else if (kind === "callback_scheduled") callbackScheduledCount += 1;
     else if (kind === "calling") callingCount += 1;
     else if (kind === "completed") completedCount += 1;
     else if (kind === "failed") failedCount += 1;
@@ -539,6 +547,23 @@ export default async function OutreachPage({
         <StatCard label="Failed / No answer" value={failedCount.toLocaleString()} delta="Failed or no-answer (placeholder)" badgeLabel="Review" accent="rose" />
       </section>
 
+      <section className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          label="Retry scheduled"
+          value={retryScheduledCount.toLocaleString()}
+          delta="Will retry automatically when due"
+          badgeLabel="Retry"
+          accent="amber"
+        />
+        <StatCard
+          label="Callback scheduled"
+          value={callbackScheduledCount.toLocaleString()}
+          delta="Candidate asked for a callback"
+          badgeLabel="Callback"
+          accent="amber"
+        />
+      </section>
+
       <section className="mt-6">
         <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-zinc-200/70 sm:p-7">
           <div className="flex items-start justify-between gap-3">
@@ -572,9 +597,13 @@ export default async function OutreachPage({
                       <th className="px-4 py-3">Phone</th>
                       <th className="px-4 py-3">Email</th>
                       <th className="px-4 py-3">Call status</th>
+                      <th className="px-4 py-3">Attempts</th>
+                      <th className="px-4 py-3">Next retry</th>
+                      <th className="px-4 py-3">Reason</th>
                       <th className="px-4 py-3">Retell</th>
                       <th className="px-4 py-3">Last error</th>
                       <th className="px-4 py-3">Last updated</th>
+                      <th className="px-4 py-3 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-200/70 bg-white">
@@ -585,7 +614,19 @@ export default async function OutreachPage({
                         const retellCallId = String((c as { retell_call_id?: unknown }).retell_call_id ?? "");
                         const retellStatus = String((c as { retell_call_status?: unknown }).retell_call_status ?? "");
                         const startedAt = String((c as { call_started_at?: unknown }).call_started_at ?? "");
+                        const nextRetryAt = String((c as { next_retry_at?: unknown }).next_retry_at ?? "");
+                        const retryReason = String((c as { retry_reason?: unknown }).retry_reason ?? "");
                         const lastError = String((c as { last_error?: unknown }).last_error ?? "");
+                        const attemptCount = Number((c as { attempt_count?: unknown }).attempt_count ?? 0);
+                        const maxAttempts = Number((c as { max_attempts?: unknown }).max_attempts ?? 3);
+
+                        const statusKind = classifyCallStatus(status);
+                        const canRetryNow =
+                          (statusKind === "retry_scheduled" || statusKind === "callback_scheduled") &&
+                          attemptCount < maxAttempts &&
+                          !isStopped &&
+                          !isPaused &&
+                          callingCount === 0;
                         return (
                           <tr key={String(c.id)} className="hover:bg-zinc-50/60">
                             <td className="px-4 py-3 font-medium text-zinc-900">{String(c.candidate_name ?? "") || "—"}</td>
@@ -601,6 +642,12 @@ export default async function OutreachPage({
                                 {callSessionLabel(status)}
                               </span>
                             </td>
+                            <td className="px-4 py-3 text-zinc-700">
+                              <span className="text-sm font-medium text-zinc-900">{attemptCount}</span>
+                              <span className="text-sm text-zinc-500"> / {maxAttempts}</span>
+                            </td>
+                            <td className="px-4 py-3 text-zinc-700">{nextRetryAt ? formatDateTime(nextRetryAt) : "—"}</td>
+                            <td className="px-4 py-3 text-zinc-700">{retryReason || "—"}</td>
                             <td className="px-4 py-3 text-zinc-700">
                               {retellCallId ? (
                                 <div className="space-y-1">
@@ -622,12 +669,21 @@ export default async function OutreachPage({
                               )}
                             </td>
                             <td className="px-4 py-3 text-zinc-700">{updated ? formatDateTime(updated) : "—"}</td>
+                            <td className="px-4 py-3">
+                              <div className="flex justify-end">
+                                <RetryNowButton
+                                  campaignId={campaign.id}
+                                  candidateCallId={String(c.id)}
+                                  disabled={!canRetryNow}
+                                />
+                              </div>
+                            </td>
                           </tr>
                         );
                       })
                     ) : (
                       <tr>
-                        <td colSpan={7} className="px-4 py-10 text-center">
+                        <td colSpan={11} className="px-4 py-10 text-center">
                           <div className="text-sm font-semibold text-zinc-900">No candidates</div>
                           <div className="mt-1 text-sm text-zinc-600">This session doesn’t have any queued candidates yet.</div>
                         </td>
