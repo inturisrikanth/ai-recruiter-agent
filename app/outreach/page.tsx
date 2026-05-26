@@ -402,7 +402,7 @@ export default async function OutreachPage({
     ? await supabase
         .from("campaign_call_candidates")
         .select(
-          "id,candidate_name,candidate_phone,candidate_email,call_status,retell_call_id,retell_call_status,call_started_at,call_completed_at,last_error,attempt_count,max_attempts,next_retry_at,retry_reason,updated_at,created_at",
+          "id,candidate_name,candidate_phone,candidate_email,call_status,call_completed_at,last_error,attempt_count,max_attempts,next_retry_at,retry_reason,updated_at,created_at",
         )
         .eq("call_session_id", sessionId)
         .order("candidate_name", { ascending: true })
@@ -607,7 +607,6 @@ export default async function OutreachPage({
                       <th className="px-4 py-3">Attempts</th>
                       <th className="px-4 py-3">Next retry</th>
                       <th className="px-4 py-3">Reason</th>
-                      <th className="px-4 py-3">Retell</th>
                       <th className="px-4 py-3">Last error</th>
                       <th className="px-4 py-3">Last updated</th>
                       <th className="px-4 py-3 text-right">Action</th>
@@ -618,9 +617,6 @@ export default async function OutreachPage({
                       (candidateRows ?? []).map((c) => {
                         const status = String(c.call_status ?? "");
                         const updated = String(c.updated_at ?? c.created_at ?? "");
-                        const retellCallId = String((c as { retell_call_id?: unknown }).retell_call_id ?? "");
-                        const retellStatus = String((c as { retell_call_status?: unknown }).retell_call_status ?? "");
-                        const startedAt = String((c as { call_started_at?: unknown }).call_started_at ?? "");
                         const nextRetryAt = String((c as { next_retry_at?: unknown }).next_retry_at ?? "");
                         const retryReason = String((c as { retry_reason?: unknown }).retry_reason ?? "");
                         const lastError = String((c as { last_error?: unknown }).last_error ?? "");
@@ -656,17 +652,6 @@ export default async function OutreachPage({
                             <td className="px-4 py-3 text-zinc-700">{nextRetryAt ? formatDateTime(nextRetryAt) : "—"}</td>
                             <td className="px-4 py-3 text-zinc-700">{retryReason || "—"}</td>
                             <td className="px-4 py-3 text-zinc-700">
-                              {retellCallId ? (
-                                <div className="space-y-1">
-                                  <div className="font-medium text-zinc-900">{retellStatus || "registered"}</div>
-                                  <div className="text-xs text-zinc-500">{retellCallId}</div>
-                                  {startedAt ? <div className="text-xs text-zinc-500">{formatDateTime(startedAt)}</div> : null}
-                                </div>
-                              ) : (
-                                <span className="text-sm text-zinc-500">—</span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 text-zinc-700">
                               {lastError ? (
                                 <span className="block max-w-[28rem] truncate text-sm text-rose-700" title={lastError}>
                                   {lastError}
@@ -690,7 +675,7 @@ export default async function OutreachPage({
                       })
                     ) : (
                       <tr>
-                        <td colSpan={11} className="px-4 py-10 text-center">
+                        <td colSpan={10} className="px-4 py-10 text-center">
                           <div className="text-sm font-semibold text-zinc-900">No candidates</div>
                           <div className="mt-1 text-sm text-zinc-600">This session doesn’t have any queued candidates yet.</div>
                         </td>

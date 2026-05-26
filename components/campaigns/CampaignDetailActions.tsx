@@ -136,15 +136,32 @@ export function CampaignEditAction(props: {
   initial: CampaignEditInitial;
   label?: string;
   className?: string;
+  disabled?: boolean;
+  onDisabledClick?: () => void;
 }) {
   const router = useRouter();
   const [isEditOpen, setIsEditOpen] = useState(false);
   const label = props.label ?? "Edit campaign";
   const className = props.className ?? defaultHeaderNeutralButtonClass();
+  const disabled = Boolean(props.disabled);
 
   return (
     <>
-      <button type="button" onClick={() => setIsEditOpen(true)} className={className}>
+      <button
+        type="button"
+        aria-disabled={disabled ? true : undefined}
+        onClick={() => {
+          if (disabled) {
+            props.onDisabledClick?.();
+            return;
+          }
+          setIsEditOpen(true);
+        }}
+        className={[
+          className,
+          disabled ? "opacity-60 cursor-not-allowed" : "",
+        ].join(" ")}
+      >
         {label}
       </button>
 

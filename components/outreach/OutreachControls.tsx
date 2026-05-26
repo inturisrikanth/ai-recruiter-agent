@@ -105,9 +105,10 @@ export function OutreachControls({
   const statusLower = (sessionStatus ?? "").toLowerCase();
   const isPaused = statusLower === "paused";
   const isStopped = statusLower === "stopped";
+  const isCompleted = statusLower === "completed";
 
-  const canPauseOrResume = hasSession && !isStopped;
-  const canStop = hasSession && !isStopped;
+  const canPauseOrResume = hasSession && !isStopped && !isCompleted;
+  const canStop = hasSession && !isStopped && !isCompleted;
 
   const pauseLabel = useMemo(() => {
     if (!hasSession) return "Pause outreach";
@@ -178,6 +179,9 @@ export function OutreachControls({
         )}
       </div>
 
+      {hasSession && isCompleted ? (
+        <div className="mt-2 text-xs text-zinc-600">Outreach completed. No pending calls remain.</div>
+      ) : null}
       {!compact && !hasSession ? (
         <div className="mt-2 text-xs text-zinc-600">Create a queue first (Step 5 “Start calls”).</div>
       ) : null}

@@ -72,6 +72,7 @@ export function CampaignWorkflow(props: {
   const router = useRouter();
   const [isQueueing, setIsQueueing] = useState(false);
   const [queueError, setQueueError] = useState<string | null>(null);
+  const [lockNotice, setLockNotice] = useState<string | null>(null);
   const candidatesComplete = candidateCount > 0;
   const activated = status === "Ready" || status === "Calling" || status === "Paused" || status === "Completed";
   const canStartCalls = status === "Ready";
@@ -80,6 +81,19 @@ export function CampaignWorkflow(props: {
   const sessionLower = String(callSessionStatus ?? "").toLowerCase();
   const sessionPaused = sessionLower === "paused";
   const sessionStopped = sessionLower === "stopped";
+  const sessionCompleted = sessionLower === "completed";
+
+  const outreachLocked =
+    status === "Calling" &&
+    hasCallSession &&
+    !sessionPaused &&
+    !sessionStopped &&
+    !sessionCompleted;
+
+  function showLockedMessage() {
+    setLockNotice("Outreach is currently running. Pause or stop outreach before editing campaign setup.");
+    window.setTimeout(() => setLockNotice(null), 6500);
+  }
 
   const currentStep = useMemo(() => {
     if (!candidatesComplete) return 2;
@@ -153,6 +167,13 @@ export function CampaignWorkflow(props: {
         </div>
       </div>
 
+      {lockNotice ? (
+        <div className="mt-4 rounded-3xl bg-amber-50 p-4 text-sm text-amber-900 ring-1 ring-amber-200/70">
+          <div className="font-semibold">Editing locked</div>
+          <div className="mt-1 text-amber-800">{lockNotice}</div>
+        </div>
+      ) : null}
+
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {steps.map((s, idx) => (
           <div
@@ -185,8 +206,10 @@ export function CampaignWorkflow(props: {
                   <CampaignEditAction
                     campaignId={campaignId}
                     initial={editInitial}
-                    className={workflowActionButtonClass(false)}
+                    className={workflowActionButtonClass(outreachLocked)}
                     label="Edit campaign"
+                    disabled={outreachLocked}
+                    onDisabledClick={showLockedMessage}
                   />
                 </div>
                 <StatusIndicator state={s.state} />
@@ -197,12 +220,23 @@ export function CampaignWorkflow(props: {
               <div className="mt-auto pt-4">
                 <div className="text-xs text-zinc-600">Attach reusable candidate lists to this campaign.</div>
                 <div className="mt-3">
-                  <Link
-                    href={`/candidates?campaignId=${encodeURIComponent(campaignId)}`}
-                    className={workflowActionButtonClass(false)}
-                  >
-                    Add candidates
-                  </Link>
+                  {outreachLocked ? (
+                    <button
+                      type="button"
+                      aria-disabled="true"
+                      className={workflowActionButtonClass(true)}
+                      onClick={showLockedMessage}
+                    >
+                      Add candidates
+                    </button>
+                  ) : (
+                    <Link
+                      href={`/candidates?campaignId=${encodeURIComponent(campaignId)}`}
+                      className={workflowActionButtonClass(false)}
+                    >
+                      Add candidates
+                    </Link>
+                  )}
                 </div>
                 <StatusIndicator state={s.state} />
               </div>
@@ -213,12 +247,23 @@ export function CampaignWorkflow(props: {
                 <div className="text-xs text-zinc-600">Set up screening questions and instructions.</div>
                 <div className="mt-3">
                   {candidatesComplete ? (
-                    <Link
-                      href={`/calls?campaignId=${encodeURIComponent(campaignId)}`}
-                      className={workflowActionButtonClass(false)}
-                    >
-                      {callsConfigured ? "Edit call configuration" : "Configure calls"}
-                    </Link>
+                    outreachLocked ? (
+                      <button
+                        type="button"
+                        aria-disabled="true"
+                        className={workflowActionButtonClass(true)}
+                        onClick={showLockedMessage}
+                      >
+                        {callsConfigured ? "Edit call configuration" : "Configure calls"}
+                      </button>
+                    ) : (
+                      <Link
+                        href={`/calls?campaignId=${encodeURIComponent(campaignId)}`}
+                        className={workflowActionButtonClass(false)}
+                      >
+                        {callsConfigured ? "Edit call configuration" : "Configure calls"}
+                      </Link>
+                    )
                   ) : (
                     <button type="button" disabled className={workflowActionButtonClass(true)}>
                       Add candidates first
@@ -238,12 +283,23 @@ export function CampaignWorkflow(props: {
                       Configure calls first
                     </button>
                   ) : (
-                    <Link
-                      href={`/campaigns/${encodeURIComponent(campaignId)}/review`}
-                      className={workflowActionButtonClass(false)}
-                    >
-                      {activated ? "View review" : "Review & activate"}
-                    </Link>
+                    outreachLocked ? (
+                      <button
+                        type="button"
+                        aria-disabled="true"
+                        className={workflowActionButtonClass(true)}
+                        onClick={showLockedMessage}
+                      >
+                        {activated ? "View review" : "Review & activate"}
+                      </button>
+                    ) : (
+                      <Link
+                        href={`/campaigns/${encodeURIComponent(campaignId)}/review`}
+                        className={workflowActionButtonClass(false)}
+                      >
+                        {activated ? "View review" : "Review & activate"}
+                      </Link>
+                    )
                   )}
                 </div>
                 <StatusIndicator state={s.state} />
