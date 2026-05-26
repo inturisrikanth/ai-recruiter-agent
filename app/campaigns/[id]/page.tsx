@@ -1,4 +1,5 @@
 import { CampaignDeleteAction } from "@/components/campaigns/CampaignDetailActions";
+import { DuplicateCampaignAction } from "@/components/campaigns/DuplicateCampaignAction";
 import { CampaignWorkflow } from "@/components/campaigns/CampaignWorkflow";
 import { AppShell } from "@/components/dashboard/AppShell";
 import { supabase } from "@/lib/supabaseClient";
@@ -206,7 +207,10 @@ export default async function CampaignDetailPage({
             <p className="mt-1 text-sm text-zinc-600">{campaign.jobTitle}</p>
           </div>
 
-          <CampaignDeleteAction campaignId={campaign.id} campaignName={campaign.campaignName} />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <DuplicateCampaignAction campaignId={campaign.id} />
+            <CampaignDeleteAction campaignId={campaign.id} campaignName={campaign.campaignName} />
+          </div>
         </div>
       </header>
 

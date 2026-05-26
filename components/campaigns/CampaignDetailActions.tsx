@@ -3,6 +3,7 @@
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { DuplicateCampaignAction } from "@/components/campaigns/DuplicateCampaignAction";
 
 type EmploymentType = "Full-time" | "Part-time" | "Contract" | "Internship";
 
@@ -118,6 +119,7 @@ export function CampaignDetailActions({
         campaignId={campaignId}
         initial={{ campaignName, jobTitle, jobDescription, requiredSkills, employmentType }}
       />
+      <DuplicateCampaignAction campaignId={campaignId} />
       <CampaignDeleteAction campaignId={campaignId} campaignName={campaignName} />
     </div>
   );
