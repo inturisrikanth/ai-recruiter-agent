@@ -651,40 +651,35 @@ export default async function ReportsPage({
             </Link>
           </div>
         </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="rounded-3xl bg-zinc-50 p-3 ring-1 ring-zinc-200/70">
+            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Campaign</div>
+            <div className="mt-1 text-sm font-semibold text-zinc-900">{String(campaign.campaign_name ?? "Campaign")}</div>
+          </div>
+          <div className="rounded-3xl bg-zinc-50 p-3 ring-1 ring-zinc-200/70">
+            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Job title</div>
+            <div className="mt-1 text-sm font-semibold text-zinc-900">{String(campaign.job_title ?? "—")}</div>
+          </div>
+          <div className="rounded-3xl bg-zinc-50 p-3 ring-1 ring-zinc-200/70">
+            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Campaign status</div>
+            <div className="mt-1">
+              <span
+                className={[
+                  "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1",
+                  pillClass(campaignStatus),
+                ].join(" ")}
+              >
+                {campaignStatus}
+              </span>
+            </div>
+            {completedAt ? <div className="mt-2 text-xs text-zinc-600">Last updated {formatDateTime(completedAt)}</div> : null}
+          </div>
+        </div>
       </header>
 
       <section className="mt-6">
-        <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-zinc-200/70 sm:p-6">
-          <h2 className="text-sm font-semibold text-zinc-900">Campaign summary</h2>
-          <p className="mt-1 text-sm text-zinc-600">High-level results from the latest outreach session.</p>
-
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <div className="rounded-3xl bg-zinc-50 p-3 ring-1 ring-zinc-200/70">
-              <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Campaign</div>
-              <div className="mt-1 text-sm font-semibold text-zinc-900">{String(campaign.campaign_name ?? "Campaign")}</div>
-            </div>
-            <div className="rounded-3xl bg-zinc-50 p-3 ring-1 ring-zinc-200/70">
-              <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Job title</div>
-              <div className="mt-1 text-sm font-semibold text-zinc-900">{String(campaign.job_title ?? "—")}</div>
-            </div>
-            <div className="rounded-3xl bg-zinc-50 p-3 ring-1 ring-zinc-200/70">
-              <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Campaign status</div>
-              <div className="mt-1">
-                <span
-                  className={[
-                    "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1",
-                    pillClass(campaignStatus),
-                  ].join(" ")}
-                >
-                  {campaignStatus}
-                </span>
-              </div>
-              {completedAt ? <div className="mt-2 text-xs text-zinc-600">Last updated {formatDateTime(completedAt)}</div> : null}
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 md:grid-cols-5">
+        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-5">
           <MetricTile label="Total calls" value={totalCalls.toLocaleString()} helper="Candidates called" accent="zinc" />
           <MetricTile label="Completed" value={completedCalls.toLocaleString()} helper="Finished calls" accent="emerald" />
           <MetricTile label="No answer" value={noAnswerCalls.toLocaleString()} helper="No pickup / voicemail" accent="rose" />
@@ -699,14 +694,16 @@ export default async function ReportsPage({
       </section>
 
       <section className="mt-6">
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-semibold text-zinc-900">Candidate results</h2>
-            <p className="mt-1 text-sm text-zinc-600">One row per candidate call. Open details for transcript, answers, and summary.</p>
+        <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-zinc-200/70 sm:p-6">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-zinc-900">Candidate results</h2>
+              <p className="mt-1 text-sm text-zinc-600">One row per candidate call. Open details for transcript, answers, and summary.</p>
+            </div>
           </div>
-        </div>
-        <div className="mt-4">
-          <CampaignReportCandidatesTable campaignId={campaignId} candidates={candidates} />
+          <div className="mt-4">
+            <CampaignReportCandidatesTable campaignId={campaignId} candidates={candidates} />
+          </div>
         </div>
       </section>
     </AppShell>

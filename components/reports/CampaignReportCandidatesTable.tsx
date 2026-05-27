@@ -31,13 +31,29 @@ type CandidateDetails = {
 
 function formatDateTime(iso: string) {
   const d = new Date(iso);
-  return d.toLocaleString(undefined, {
+  // Deterministic formatting for SSR + hydration:
+  // - fixed locale
+  // - no reliance on runtime punctuation (comma vs "at")
+  // - fixed assembly order
+  const parts = new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
-  });
+    hour12: true,
+  }).formatToParts(d);
+
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+  const month = get("month");
+  const day = get("day");
+  const year = get("year");
+  const hour = get("hour");
+  const minute = get("minute");
+  const dayPeriod = get("dayPeriod");
+
+  // Example: "May 25, 2026, 7:06 PM"
+  return `${month} ${day}, ${year}, ${hour}:${minute} ${dayPeriod}`.trim();
 }
 
 function normalize(value: unknown) {
@@ -201,13 +217,36 @@ export function CampaignReportCandidatesTable({
   campaignId: string;
   candidates: CandidateRow[];
 }) {
+  const [search, setSearch] = useState("");
+  const [interestFilter, setInterestFilter] = useState<"all" | "interested" | "not_interested" | "unknown">("all");
   const [openId, setOpenId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [details, setDetails] = useState<CandidateDetails | null>(null);
 
+  const filteredCandidates = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return candidates.filter((c) => {
+      const interest = interestKind(c.interest_status);
+      if (interestFilter !== "all" && interest !== interestFilter) return false;
+
+      if (!q) return true;
+      const hay = [c.candidate_name, c.candidate_phone ?? "", c.candidate_email ?? ""].join(" ").toLowerCase();
+      return hay.includes(q);
+    });
+  }, [candidates, interestFilter, search]);
+
   const selected = useMemo(() => candidates.find((c) => c.id === openId) ?? null, [candidates, openId]);
   const drawerTitle = selected?.candidate_name || details?.candidate_name || "Candidate";
+
+  function filterPillClass(active: boolean) {
+    return [
+      "inline-flex h-9 items-center justify-center rounded-full px-4 text-sm font-semibold ring-1 transition",
+      active
+        ? "bg-indigo-600 text-white ring-indigo-500/20"
+        : "bg-white text-zinc-900 ring-zinc-200/70 hover:bg-zinc-50",
+    ].join(" ");
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -239,6 +278,48 @@ export function CampaignReportCandidatesTable({
 
   return (
     <>
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <label className="sr-only" htmlFor="candidate-search">
+            Search candidates
+          </label>
+          <input
+            id="candidate-search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search candidates by name, phone, or email"
+            className="h-11 w-full rounded-3xl bg-white px-4 text-sm text-zinc-900 shadow-sm ring-1 ring-zinc-200/70 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={filterPillClass(interestFilter === "all")} onClick={() => setInterestFilter("all")}>
+            All
+          </button>
+          <button
+            type="button"
+            className={filterPillClass(interestFilter === "interested")}
+            onClick={() => setInterestFilter("interested")}
+          >
+            Interested
+          </button>
+          <button
+            type="button"
+            className={filterPillClass(interestFilter === "not_interested")}
+            onClick={() => setInterestFilter("not_interested")}
+          >
+            Not interested
+          </button>
+          <button
+            type="button"
+            className={filterPillClass(interestFilter === "unknown")}
+            onClick={() => setInterestFilter("unknown")}
+          >
+            Unknown
+          </button>
+        </div>
+      </div>
+
       <div className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-zinc-200/70">
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
@@ -253,7 +334,7 @@ export function CampaignReportCandidatesTable({
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-200/70">
-              {candidates.map((c) => (
+              {filteredCandidates.map((c) => (
                 <tr key={c.id} className="hover:bg-zinc-50/60">
                   <td className="px-4 py-3">
                     <div className="font-semibold text-zinc-900">{c.candidate_name || "Candidate"}</div>
@@ -296,10 +377,10 @@ export function CampaignReportCandidatesTable({
                   </td>
                 </tr>
               ))}
-              {!candidates.length ? (
+              {!filteredCandidates.length ? (
                 <tr>
                   <td className="px-4 py-8 text-sm text-zinc-600" colSpan={6}>
-                    No candidates found for this report.
+                    No candidates match your filters.
                   </td>
                 </tr>
               ) : null}

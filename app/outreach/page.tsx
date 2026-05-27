@@ -622,7 +622,6 @@ export default async function OutreachPage({
                       <th className="px-4 py-3">Attempts</th>
                       <th className="px-4 py-3">Next retry</th>
                       <th className="px-4 py-3">Reason</th>
-                      <th className="px-4 py-3">Last error</th>
                       <th className="px-4 py-3">Last updated</th>
                       <th className="px-4 py-3 text-right">Action</th>
                     </tr>
@@ -634,7 +633,6 @@ export default async function OutreachPage({
                         const updated = String(c.updated_at ?? c.created_at ?? "");
                         const nextRetryAt = String((c as { next_retry_at?: unknown }).next_retry_at ?? "");
                         const retryReason = String((c as { retry_reason?: unknown }).retry_reason ?? "");
-                        const lastError = String((c as { last_error?: unknown }).last_error ?? "");
                         const attemptCount = Number((c as { attempt_count?: unknown }).attempt_count ?? 0);
                         const maxAttempts = Number((c as { max_attempts?: unknown }).max_attempts ?? 3);
 
@@ -666,15 +664,6 @@ export default async function OutreachPage({
                             </td>
                             <td className="px-4 py-3 text-zinc-700">{nextRetryAt ? formatDateTime(nextRetryAt) : "—"}</td>
                             <td className="px-4 py-3 text-zinc-700">{retryReason || "—"}</td>
-                            <td className="px-4 py-3 text-zinc-700">
-                              {lastError ? (
-                                <span className="block max-w-[28rem] truncate text-sm text-rose-700" title={lastError}>
-                                  {lastError}
-                                </span>
-                              ) : (
-                                <span className="text-sm text-zinc-500">—</span>
-                              )}
-                            </td>
                             <td className="px-4 py-3 text-zinc-700">{updated ? formatDateTime(updated) : "—"}</td>
                             <td className="px-4 py-3">
                               <div className="flex justify-end">
@@ -690,7 +679,7 @@ export default async function OutreachPage({
                       })
                     ) : (
                       <tr>
-                        <td colSpan={10} className="px-4 py-10 text-center">
+                        <td colSpan={9} className="px-4 py-10 text-center">
                           <div className="text-sm font-semibold text-zinc-900">No candidates</div>
                           <div className="mt-1 text-sm text-zinc-600">This session doesn’t have any queued candidates yet.</div>
                         </td>
