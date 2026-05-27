@@ -1,5 +1,4 @@
 import { AppShell } from "@/components/dashboard/AppShell";
-import { StatCard } from "@/components/dashboard/StatCard";
 import { OutreachControls } from "@/components/outreach/OutreachControls";
 import { RetryNowButton } from "@/components/outreach/RetryNowButton";
 import { supabase } from "@/lib/supabaseClient";
@@ -40,6 +39,53 @@ function pillClass(status: string) {
     return "bg-rose-50 text-rose-800 ring-rose-200/70";
   }
   return "bg-zinc-100 text-zinc-700 ring-zinc-200/80";
+}
+
+type CompactStatCardProps = {
+  label: string;
+  value: string;
+  delta: string;
+  badgeLabel?: string;
+  accent?: "indigo" | "emerald" | "sky" | "amber" | "rose" | "zinc";
+};
+
+function badgeClasses(accent: NonNullable<CompactStatCardProps["accent"]>) {
+  switch (accent) {
+    case "emerald":
+      return "bg-emerald-50 text-emerald-700 ring-emerald-200/70";
+    case "sky":
+      return "bg-sky-50 text-sky-700 ring-sky-200/70";
+    case "amber":
+      return "bg-amber-50 text-amber-700 ring-amber-200/70";
+    case "rose":
+      return "bg-rose-50 text-rose-700 ring-rose-200/70";
+    case "zinc":
+      return "bg-zinc-100 text-zinc-700 ring-zinc-200/80";
+    case "indigo":
+    default:
+      return "bg-indigo-50 text-indigo-700 ring-indigo-200/70";
+  }
+}
+
+function CompactStatCard({
+  label,
+  value,
+  delta,
+  badgeLabel = "Live",
+  accent = "indigo",
+}: CompactStatCardProps) {
+  return (
+    <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-zinc-200/70">
+      <div className="flex items-start justify-between gap-3">
+        <div className="text-sm font-medium text-zinc-500">{label}</div>
+        <span className={["rounded-full px-2 py-1 text-xs font-medium ring-1", badgeClasses(accent)].join(" ")}>
+          {badgeLabel}
+        </span>
+      </div>
+      <div className="mt-2 text-2xl font-semibold tracking-tight text-zinc-900">{value}</div>
+      <div className="mt-1 text-sm text-zinc-600">{delta}</div>
+    </div>
+  );
 }
 
 function formatDateTime(iso: string) {
@@ -448,15 +494,6 @@ export default async function OutreachPage({
 
             <h1 className="mt-2 truncate text-2xl font-semibold tracking-tight text-zinc-900 sm:text-3xl">Outreach</h1>
             <p className="mt-1 text-sm text-zinc-600">Live and queued call operations for this campaign.</p>
-
-            {isStopped ? (
-              <div className="mt-3 rounded-3xl bg-rose-50 p-4 text-sm text-rose-800 ring-1 ring-rose-200/70">
-                <div className="font-semibold text-rose-900">Outreach stopped</div>
-                <div className="mt-1">
-                  This outreach was stopped. To start calls again, go back to the campaign, review/activate it, and start outreach again.
-                </div>
-              </div>
-            ) : null}
           </div>
 
           <div className="flex justify-start sm:justify-end">
@@ -471,91 +508,69 @@ export default async function OutreachPage({
             </Link>
           </div>
 
-          {!isStopped ? (
-            <div className="flex justify-start sm:col-start-2 sm:justify-end">
-              <OutreachControls
-                campaignId={campaign.id}
-                hasSession={Boolean(sessionId)}
-                sessionStatus={sessionStatus || null}
-                compact
-              />
+          <div className="sm:col-span-2">
+            <div className="mt-3 flex w-full flex-wrap items-start gap-3 sm:flex-nowrap sm:items-center">
+              <div className="flex flex-wrap gap-2 sm:flex-nowrap">
+                <div className="min-w-[180px] rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Outreach status</div>
+                  <div className="mt-2">
+                    {sessionId ? (
+                      <span
+                        className={[
+                          "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1",
+                          pillClass(sessionStatus || "zinc"),
+                        ].join(" ")}
+                      >
+                        {callSessionLabel(sessionStatus)}
+                      </span>
+                    ) : (
+                      <span className="text-sm font-semibold text-zinc-900">No call session yet</span>
+                    )}
+                  </div>
+                </div>
+                <div className="min-w-[180px] rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Total candidates</div>
+                  <div className="mt-2 text-sm font-semibold text-zinc-900">{totalCandidates.toLocaleString()}</div>
+                </div>
+              </div>
+
+              {!isStopped ? (
+                <div className="ml-auto flex shrink-0 justify-end">
+                  <OutreachControls
+                    campaignId={campaign.id}
+                    hasSession={Boolean(sessionId)}
+                    sessionStatus={sessionStatus || null}
+                    compact
+                  />
+                </div>
+              ) : null}
             </div>
-          ) : null}
+
+            {isStopped ? (
+              <div className="mt-3 rounded-3xl bg-rose-50 p-4 text-sm text-rose-800 ring-1 ring-rose-200/70">
+                <div className="font-semibold text-rose-900">Outreach stopped</div>
+                <div className="mt-1">
+                  This outreach was stopped. To start calls again, go back to the campaign, review/activate it, and start outreach again.
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
 
-      <section className="mt-6 grid gap-3 lg:grid-cols-3">
-        <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-zinc-200/70 sm:p-7 lg:col-span-2">
-          <h2 className="text-sm font-semibold text-zinc-900">Operations summary</h2>
-          <p className="mt-1 text-sm text-zinc-600">High-level state for current call processing.</p>
-
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
-              <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Campaign</div>
-              <div className="mt-2 text-sm font-semibold text-zinc-900">{campaign.name}</div>
-            </div>
-            <div className="rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
-              <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Campaign status</div>
-              <div className="mt-2 text-sm font-semibold text-zinc-900">{campaign.status}</div>
-            </div>
-            <div className="rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
-              <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Session status</div>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <span
-                  className={[
-                    "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1",
-                    pillClass(sessionStatus || "zinc"),
-                  ].join(" ")}
-                >
-                  {callSessionLabel(sessionStatus)}
-                </span>
-                {!sessionId ? <span className="text-sm text-zinc-600">No call session yet</span> : null}
-              </div>
-            </div>
-            <div className="rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
-              <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Total candidates</div>
-              <div className="mt-2 text-sm font-semibold text-zinc-900">{totalCandidates.toLocaleString()}</div>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-zinc-200/70 sm:p-7">
-          <h2 className="text-sm font-semibold text-zinc-900">Next actions</h2>
-          <p className="mt-1 text-sm text-zinc-600">Controls will show up here as outreach becomes live.</p>
-
-          <div className="mt-5 grid gap-2">
-            <div className="rounded-2xl bg-zinc-50 px-4 py-3 text-sm ring-1 ring-zinc-200/70">
-              <div className="font-semibold text-zinc-900">Retry settings</div>
-              <div className="mt-1 text-sm text-zinc-600">Placeholder (not implemented).</div>
-            </div>
-            <div className="rounded-2xl bg-zinc-50 px-4 py-3 text-sm ring-1 ring-zinc-200/70">
-              <div className="font-semibold text-zinc-900">Pause / Resume</div>
-              <div className="mt-1 text-sm text-zinc-600">Placeholder (Retell pause/resume not connected yet).</div>
-            </div>
-            <div className="rounded-2xl bg-zinc-50 px-4 py-3 text-sm ring-1 ring-zinc-200/70">
-              <div className="font-semibold text-zinc-900">Completed call summaries</div>
-              <div className="mt-1 text-sm text-zinc-600">Placeholder (not implemented).</div>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Queued" value={queuedCount.toLocaleString()} delta="Candidates waiting to be called" badgeLabel="Queue" accent="sky" />
-        <StatCard label="Calling" value={callingCount.toLocaleString()} delta="In-progress calls (placeholder)" badgeLabel="Live" accent="indigo" />
-        <StatCard label="Completed" value={completedCount.toLocaleString()} delta="Calls completed (placeholder)" badgeLabel="Done" accent="emerald" />
-        <StatCard label="Failed / No answer" value={failedCount.toLocaleString()} delta="Failed or no-answer (placeholder)" badgeLabel="Review" accent="rose" />
-      </section>
-
-      <section className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
+        <CompactStatCard label="Queued" value={queuedCount.toLocaleString()} delta="Candidates waiting to be called" badgeLabel="Queue" accent="sky" />
+        <CompactStatCard label="Calling" value={callingCount.toLocaleString()} delta="In-progress calls (placeholder)" badgeLabel="Live" accent="indigo" />
+        <CompactStatCard label="Completed" value={completedCount.toLocaleString()} delta="Calls completed (placeholder)" badgeLabel="Done" accent="emerald" />
+        <CompactStatCard label="Failed / No answer" value={failedCount.toLocaleString()} delta="Failed or no-answer (placeholder)" badgeLabel="Review" accent="rose" />
+        <CompactStatCard
           label="Retry scheduled"
           value={retryScheduledCount.toLocaleString()}
           delta="Will retry automatically when due"
           badgeLabel="Retry"
           accent="amber"
         />
-        <StatCard
+        <CompactStatCard
           label="Callback scheduled"
           value={callbackScheduledCount.toLocaleString()}
           delta="Candidate asked for a callback"

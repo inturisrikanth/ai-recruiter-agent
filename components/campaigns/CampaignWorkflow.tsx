@@ -120,6 +120,8 @@ export function CampaignWorkflow(props: {
   ];
 
   const step5State = canStartCalls ? ("current" as const) : outreachActive ? ("complete" as const) : ("pending" as const);
+  const reportsAvailable = sessionCompleted || status === "Completed";
+  const step6State = reportsAvailable ? ("complete" as const) : ("pending" as const);
 
   async function onStartCalls() {
     if (!canStartCalls || isQueueing) return;
@@ -366,6 +368,44 @@ export function CampaignWorkflow(props: {
             ) : null}
             {queueError ? <div className="mt-3 text-xs font-semibold text-rose-700">{queueError}</div> : null}
             <StatusIndicator state={step5State} />
+          </div>
+        </div>
+
+        <div
+          className={[
+            "flex h-full flex-col rounded-3xl p-4 ring-1 shadow-sm transition hover:shadow-md",
+            stepCardClass(step6State),
+          ].join(" ")}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Step 6</div>
+            <span
+              className={[
+                "grid size-7 place-items-center rounded-2xl text-xs font-semibold ring-1",
+                stepBadgeClass(step6State),
+              ].join(" ")}
+            >
+              {step6State === "complete" ? "✓" : 6}
+            </span>
+          </div>
+
+          <div className="mt-3 text-sm font-semibold text-zinc-900">Reports</div>
+          <div className="mt-4 text-xs text-zinc-600">
+            Review completed call results, summaries, and candidate outcomes.
+          </div>
+
+          <div className="mt-auto pt-4">
+            {reportsAvailable ? (
+              <Link href={`/reports?campaignId=${encodeURIComponent(campaignId)}`} className={workflowActionButtonClass(false)}>
+                View report
+              </Link>
+            ) : (
+              <button type="button" disabled className={workflowActionButtonClass(true)}>
+                Available after outreach completes
+              </button>
+            )}
+            <div className="mt-2 text-xs text-zinc-600">Available after Step 5 completes</div>
+            <StatusIndicator state={step6State} />
           </div>
         </div>
       </div>
