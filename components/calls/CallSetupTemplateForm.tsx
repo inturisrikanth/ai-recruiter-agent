@@ -14,28 +14,52 @@ import {
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
-export type CallConfigurationDraft = {
+export type CallSetupTemplateDraft = {
+  templateName: string;
+  companyName: string;
+  selectedQuestions: string[];
+  customQuestions: string[];
+  callNotes: string;
+};
+
+export type CallSetupTemplateInitial = {
+  id: string;
+  templateName: string;
   companyName: string | null;
   selectedQuestions: string[];
   customQuestions: string[];
   callNotes: string | null;
 };
 
-export function CallConfigurationForm({
-  campaignId,
+export function CallSetupTemplateForm({
+  mode,
+  templateId,
   initial,
+  returnTo,
 }: {
-  campaignId: string;
-  initial: CallConfigurationDraft | null;
+  mode: "create" | "edit";
+  templateId?: string;
+  initial?: CallSetupTemplateInitial | null;
+  returnTo?: string | null;
 }) {
   const router = useRouter();
 
-  const initialSelected = useMemo(() => new Set(normalizeStringArray(initial?.selectedQuestions)), [initial]);
-  const [companyName, setCompanyName] = useState(initial?.companyName ?? "");
+  const initialSelected = useMemo(
+    () => new Set(normalizeStringArray(initial?.selectedQuestions)),
+    [initial],
+  );
+
+  const [templateName, setTemplateName] = useState(initial?.templateName ?? "");
+  const [companyName, setCompanyName] = useState(String(initial?.companyName ?? ""));
   const [selected, setSelected] = useState<Set<string>>(() => new Set(initialSelected));
-  const [customQuestions, setCustomQuestions] = useState<string[]>(() => normalizeStringArray(initial?.customQuestions));
+  const [customQuestions, setCustomQuestions] = useState<string[]>(
+    () => normalizeStringArray(initial?.customQuestions),
+  );
   const [customQuestionDraft, setCustomQuestionDraft] = useState("");
-  const [callNotes, setCallNotes] = useState(initial?.callNotes ?? "");
+  const [callNotes, setCallNotes] = useState(String(initial?.callNotes ?? ""));
+
+  const [templateTouched, setTemplateTouched] = useState(false);
+  const [templateValidation, setTemplateValidation] = useState<string | null>(null);
 
   const [companyTouched, setCompanyTouched] = useState(false);
   const [companyValidation, setCompanyValidation] = useState<string | null>(null);
@@ -64,11 +88,27 @@ export function CallConfigurationForm({
     setCustomQuestions((prev) => prev.filter((_, i) => i !== idx));
   }
 
+  function getSafeReturnTo(value: string | null | undefined) {
+    const v = String(value ?? "").trim();
+    if (!v) return "/calls";
+    if (!v.startsWith("/")) return "/calls";
+    if (v.startsWith("//")) return "/calls";
+    return v;
+  }
+
   async function onSave() {
     if (isSaving) return;
     setIsSaving(true);
     setError(null);
     setSaved(false);
+
+    const safeTemplateName = templateName.trim();
+    if (!safeTemplateName.length) {
+      setTemplateTouched(true);
+      setTemplateValidation("Template name is required.");
+      setIsSaving(false);
+      return;
+    }
 
     const safeCompany = companyName.trim();
     if (!safeCompany.length) {
@@ -78,69 +118,117 @@ export function CallConfigurationForm({
       return;
     }
 
-    const safeNotes = callNotes.trim();
     const selectedQuestions = Array.from(selected).map((q) => q.trim()).filter(Boolean);
     const custom = customQuestions.map((q) => q.trim()).filter(Boolean);
+    const safeNotes = callNotes.trim();
 
-    const { error } = await supabase
-      .from("call_configurations")
-      .upsert(
-        {
-          campaign_id: campaignId,
+    try {
+      if (mode === "create") {
+        const { error: createErr } = await supabase.from("call_setup_templates").insert({
+          template_name: safeTemplateName,
           company_name: safeCompany,
           selected_questions: selectedQuestions,
           custom_questions: custom,
           call_notes: safeNotes.length ? safeNotes : null,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "campaign_id" },
-      );
+        });
+        if (createErr) throw createErr;
+      } else {
+        if (!templateId) throw new Error("Missing template id.");
+        const { error: updateErr } = await supabase
+          .from("call_setup_templates")
+          .update({
+            template_name: safeTemplateName,
+            company_name: safeCompany,
+            selected_questions: selectedQuestions,
+            custom_questions: custom,
+            call_notes: safeNotes.length ? safeNotes : null,
+          })
+          .eq("id", templateId);
+        if (updateErr) throw updateErr;
+      }
 
-    if (error) {
-      setError(error.message);
+      setSaved(true);
       setIsSaving(false);
-      return;
+      window.setTimeout(() => {
+        router.push(getSafeReturnTo(returnTo));
+        router.refresh();
+      }, 550);
+    } catch (e) {
+      const errObj = e as unknown as {
+        message?: unknown;
+        details?: unknown;
+        hint?: unknown;
+        code?: unknown;
+      };
+
+      const parts = [
+        typeof errObj.message === "string" && errObj.message.trim().length ? errObj.message.trim() : null,
+        typeof errObj.details === "string" && errObj.details.trim().length ? errObj.details.trim() : null,
+        typeof errObj.hint === "string" && errObj.hint.trim().length ? errObj.hint.trim() : null,
+        typeof errObj.code === "string" && errObj.code.trim().length ? `Code: ${errObj.code.trim()}` : null,
+      ].filter(Boolean);
+
+      setError(parts.length ? parts.join(" • ") : "Couldn’t save template.");
+      setIsSaving(false);
     }
-
-    setSaved(true);
-    setIsSaving(false);
-
-    window.setTimeout(() => {
-      router.push(`/campaigns/${encodeURIComponent(campaignId)}`);
-      router.refresh();
-    }, 650);
   }
+
+  const templateOk = templateName.trim().length > 0;
+  const templateError =
+    templateValidation ?? (templateTouched && !templateOk ? "Template name is required." : null);
 
   const companyOk = companyName.trim().length > 0;
   const companyError =
-    companyValidation ?? (companyTouched && !companyOk ? "Company / consultancy name is required." : null);
+    companyValidation ??
+    (companyTouched && !companyOk ? "Company / consultancy name is required." : null);
 
   return (
     <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-zinc-200/70 sm:p-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="text-sm font-semibold text-zinc-900">Call configuration</div>
-          <div className="mt-1 text-sm text-zinc-600">
-            Choose what the AI recruiter should ask and any special instructions to follow.
-          </div>
-        </div>
+      <div className="text-sm font-semibold text-zinc-900">
+        {mode === "create" ? "New call setup template" : "Edit call setup template"}
+      </div>
+      <div className="mt-1 text-sm text-zinc-600">
+        Save a reusable set of screening questions and instructions, then apply it to campaigns.
       </div>
 
       {saved ? (
         <div className="mt-5 rounded-3xl bg-emerald-50 p-4 text-sm text-emerald-900 ring-1 ring-emerald-200/70">
           <div className="font-semibold">Saved</div>
-          <div className="mt-1 text-emerald-800">Returning to the campaign…</div>
+          <div className="mt-1 text-emerald-800">Returning to templates…</div>
         </div>
       ) : null}
 
       {error ? (
         <div className="mt-5 rounded-3xl bg-rose-50 p-4 text-sm text-rose-800 ring-1 ring-rose-200/70">
-          <div className="font-semibold text-rose-900">Couldn’t save configuration</div>
+          <div className="font-semibold text-rose-900">Couldn’t save template</div>
           <div className="mt-1">{error}</div>
         </div>
       ) : null}
 
       <div className="mt-6 grid gap-5">
+        <Field label="Template name" hint="Required">
+          <div>
+            <input
+              value={templateName}
+              onChange={(e) => {
+                setTemplateName(e.target.value);
+                setTemplateValidation(null);
+              }}
+              onBlur={() => setTemplateTouched(true)}
+              className={[
+                inputClass(),
+                templateError ? "ring-rose-300 focus:ring-rose-500/15" : "",
+              ].join(" ")}
+              placeholder="e.g. “Consulting screen — Standard”"
+              aria-invalid={templateError ? true : undefined}
+              disabled={isSaving}
+            />
+            {templateError ? (
+              <div className="mt-2 text-sm font-medium text-rose-700">{templateError}</div>
+            ) : null}
+          </div>
+        </Field>
+
         <Field label="Company / consultancy name" hint="Required">
           <div>
             <input
@@ -190,11 +278,9 @@ export function CallConfigurationForm({
         </div>
 
         <div className="grid gap-3">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
-            <div>
-              <div className="text-sm font-semibold text-zinc-900">Custom questions</div>
-              <div className="mt-1 text-sm text-zinc-600">Add role-specific questions your team cares about.</div>
-            </div>
+          <div>
+            <div className="text-sm font-semibold text-zinc-900">Custom questions</div>
+            <div className="mt-1 text-sm text-zinc-600">Add role-specific questions your team cares about.</div>
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -258,9 +344,7 @@ export function CallConfigurationForm({
         <Field label="Call notes / instructions" hint="Optional">
           <textarea
             value={callNotes}
-            onChange={(e) => {
-              setCallNotes(e.target.value);
-            }}
+            onChange={(e) => setCallNotes(e.target.value)}
             className={textareaClass()}
             placeholder="e.g. Keep the call under 8 minutes. Probe for leadership experience and availability."
             disabled={isSaving}
@@ -271,6 +355,11 @@ export function CallConfigurationForm({
           <button
             type="button"
             onClick={() => {
+              if (!templateOk) {
+                setTemplateTouched(true);
+                setTemplateValidation("Template name is required.");
+                return;
+              }
               if (!companyOk) {
                 setCompanyTouched(true);
                 setCompanyValidation("Company / consultancy name is required.");
@@ -279,10 +368,10 @@ export function CallConfigurationForm({
               void onSave();
             }}
             disabled={isSaving}
-            aria-disabled={!companyOk || isSaving}
-            className={primaryButtonClass(isSaving || !companyOk)}
+            aria-disabled={!templateOk || !companyOk || isSaving}
+            className={primaryButtonClass(isSaving || !templateOk || !companyOk)}
           >
-            {isSaving ? "Saving…" : "Save configuration"}
+            {isSaving ? "Saving…" : "Save template"}
           </button>
         </div>
       </div>
