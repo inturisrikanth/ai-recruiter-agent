@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabaseClient";
 import Papa from "papaparse";
+import * as XLSX from "xlsx";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -24,6 +25,11 @@ type CsvWarnings = {
   duplicateCount: number;
   missingPhoneCount: number;
   missingEmailCount: number;
+};
+
+type ParsedTable = {
+  fields: string[];
+  data: Array<Record<string, unknown>>;
 };
 
 const stableNumberFormatter = new Intl.NumberFormat("en-US");
@@ -118,7 +124,11 @@ function Field({
     <label className="block">
       <div className="flex items-baseline justify-between gap-3">
         <span className="text-sm font-semibold text-zinc-900">{label}</span>
-        {hint ? <span className="text-xs text-zinc-500">{hint}</span> : null}
+        {hint ? (
+          <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs text-emerald-700 ring-1 ring-emerald-200/70">
+            {hint}
+          </span>
+        ) : null}
       </div>
       <div className="mt-2">{children}</div>
     </label>
@@ -188,6 +198,8 @@ export function CandidateListsManager({
   const [file, setFile] = useState<File | null>(null);
   const [parsedRows, setParsedRows] = useState<ParsedCandidateRow[]>([]);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [missingNameRows, setMissingNameRows] = useState<string[]>([]);
+  const [missingPhoneNames, setMissingPhoneNames] = useState<string[]>([]);
   const [csvWarnings, setCsvWarnings] = useState<CsvWarnings>({
     duplicateCount: 0,
     missingPhoneCount: 0,
@@ -220,6 +232,8 @@ export function CandidateListsManager({
     setFile(null);
     setParsedRows([]);
     setParseError(null);
+    setMissingNameRows([]);
+    setMissingPhoneNames([]);
     setCsvWarnings({ duplicateCount: 0, missingPhoneCount: 0, missingEmailCount: 0 });
     setSaveError(null);
     setIsSaving(false);
@@ -230,17 +244,11 @@ export function CandidateListsManager({
     resetModal();
   }
 
-  async function parseCsv(selected: File) {
-    setParseError(null);
-    setParsedRows([]);
-    setCsvWarnings({ duplicateCount: 0, missingPhoneCount: 0, missingEmailCount: 0 });
-    setSaveError(null);
+  function normalizeHeader(value: unknown) {
+    return String(value ?? "").trim().toLowerCase();
+  }
 
-    if (!selected.name.toLowerCase().endsWith(".csv")) {
-      setParseError("Please upload a .csv file.");
-      return;
-    }
-
+  async function parseCsvTable(selected: File): Promise<{ ok: true; table: ParsedTable } | { ok: false; error: string }> {
     const text = await selected.text();
     const result = Papa.parse<Record<string, unknown>>(text, {
       header: true,
@@ -249,19 +257,83 @@ export function CandidateListsManager({
     });
 
     if (result.errors?.length) {
-      setParseError(result.errors[0]?.message ?? "Couldn’t parse CSV.");
-      return;
+      return { ok: false, error: result.errors[0]?.message ?? "Couldn’t parse CSV." };
     }
 
     const fields = (result.meta.fields ?? []).map((f) => f.trim().toLowerCase());
-    const required = ["name", "phone", "email"];
+    const data = (result.data ?? []) as Array<Record<string, unknown>>;
+    return { ok: true, table: { fields, data } };
+  }
+
+  async function parseXlsxTable(selected: File): Promise<{ ok: true; table: ParsedTable } | { ok: false; error: string }> {
+    let workbook: XLSX.WorkBook;
+    try {
+      const buf = await selected.arrayBuffer();
+      workbook = XLSX.read(buf, { type: "array" });
+    } catch {
+      return { ok: false, error: "Couldn’t parse Excel file." };
+    }
+
+    const sheetName = workbook.SheetNames?.[0] ?? "";
+    if (!sheetName) return { ok: false, error: "No worksheet found in this Excel file." };
+    const sheet = workbook.Sheets?.[sheetName];
+    if (!sheet) return { ok: false, error: "Couldn’t read the first worksheet." };
+
+    const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, defval: "" });
+    const rows = Array.isArray(matrix) ? matrix : [];
+    if (!rows.length) return { ok: false, error: "No rows found. Ensure your file has a header row and data." };
+
+    const headerRow = (rows[0] ?? []) as unknown[];
+    const rawHeaders = headerRow.map(normalizeHeader);
+    const headerByIndex = rawHeaders.map((h) => h);
+    const fields = rawHeaders.filter(Boolean);
+
+    const data: Array<Record<string, unknown>> = [];
+    for (let i = 1; i < rows.length; i += 1) {
+      const row = (rows[i] ?? []) as unknown[];
+      const record: Record<string, unknown> = {};
+      for (let col = 0; col < headerByIndex.length; col += 1) {
+        const key = headerByIndex[col];
+        if (!key) continue;
+        record[key] = row[col];
+      }
+      data.push(record);
+    }
+
+    return { ok: true, table: { fields, data } };
+  }
+
+  async function parseFile(selected: File) {
+    setParseError(null);
+    setParsedRows([]);
+    setMissingNameRows([]);
+    setMissingPhoneNames([]);
+    setCsvWarnings({ duplicateCount: 0, missingPhoneCount: 0, missingEmailCount: 0 });
+    setSaveError(null);
+
+    const filename = selected.name.toLowerCase();
+    const isCsv = filename.endsWith(".csv");
+    const isXlsx = filename.endsWith(".xlsx");
+    if (!isCsv && !isXlsx) {
+      setParseError("Please upload a .csv or .xlsx file.");
+      return;
+    }
+
+    const parsed = isCsv ? await parseCsvTable(selected) : await parseXlsxTable(selected);
+    if (!parsed.ok) {
+      setParseError(parsed.error);
+      return;
+    }
+
+    const { fields, data } = parsed.table;
+    const required = ["name", "phone"];
     const missing = required.filter((r) => !fields.includes(r));
     if (missing.length) {
       setParseError(`Missing required columns: ${missing.join(", ")}.`);
       return;
     }
 
-    const rows = (result.data ?? [])
+    const rows = (data ?? [])
       .map((row) => ({
         name: String(row.name ?? "").trim(),
         phone: String(row.phone ?? "").trim(),
@@ -270,7 +342,7 @@ export function CandidateListsManager({
       .filter((r) => r.name || r.phone || r.email);
 
     if (!rows.length) {
-      setParseError("No rows found. Ensure your CSV has data and the required columns.");
+      setParseError("No rows found. Ensure your file has data and the required columns.");
       return;
     }
 
@@ -280,13 +352,23 @@ export function CandidateListsManager({
     let duplicateCount = 0;
     let missingPhoneCount = 0;
     let missingEmailCount = 0;
+    const missingNames: string[] = [];
+    const missingPhones: string[] = [];
     const seen = new Set<string>();
 
-    for (const r of rows) {
+    for (let i = 0; i < rows.length; i += 1) {
+      const r = rows[i] as ParsedCandidateRow;
       const phone = normalizePhone(r.phone);
       const email = normalizeEmail(r.email);
 
-      if (!phone) missingPhoneCount += 1;
+      if (!r.name) {
+        // Row numbers are 1-indexed, plus 1 for the header row.
+        missingNames.push(`Row ${i + 2}`);
+      }
+      if (!phone) {
+        missingPhoneCount += 1;
+        missingPhones.push(r.name || "Unnamed candidate");
+      }
       if (!email) missingEmailCount += 1;
 
       const key = phone ? `p:${phone}` : email ? `e:${email}` : null;
@@ -296,6 +378,11 @@ export function CandidateListsManager({
     }
 
     setParsedRows(rows);
+    if (missingNames.length || missingPhones.length) {
+      setParseError("Cannot import candidate list.");
+      setMissingNameRows(missingNames);
+      setMissingPhoneNames(missingPhones);
+    }
     setCsvWarnings({ duplicateCount, missingPhoneCount, missingEmailCount });
   }
 
@@ -661,7 +748,7 @@ export function CandidateListsManager({
       {isUploadOpen ? (
         <ModalShell
           title="Upload candidate list"
-          description="CSV only for now. Required columns: name, phone, email."
+          description="Supported formats: .csv, .xlsx."
           footer={
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button type="button" onClick={closeModal} className={secondaryButtonClass()}>
@@ -689,10 +776,10 @@ export function CandidateListsManager({
               />
             </Field>
 
-            <Field label="CSV file" hint="Accepts .csv">
+            <Field label="File" hint="Accepted formats: .csv, .xlsx">
               <input
                 type="file"
-                accept=".csv,text/csv"
+                accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
                 className={[
                   "block w-full rounded-2xl bg-white px-4 py-3 text-sm text-zinc-900 shadow-sm ring-1 ring-zinc-200/70",
                   "file:mr-4 file:rounded-full file:border-0 file:bg-zinc-900 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-zinc-800",
@@ -702,29 +789,64 @@ export function CandidateListsManager({
                   setFile(f);
                   setParsedRows([]);
                   setParseError(null);
+                  setMissingNameRows([]);
+                  setMissingPhoneNames([]);
                   setCsvWarnings({ duplicateCount: 0, missingPhoneCount: 0, missingEmailCount: 0 });
                   setSaveError(null);
-                  if (f) await parseCsv(f);
+                  if (f) await parseFile(f);
                 }}
               />
-              <div className="mt-2 text-xs text-zinc-500">
-                Columns must be exactly <span className="font-semibold text-zinc-700">name</span>,{" "}
-                <span className="font-semibold text-zinc-700">phone</span>,{" "}
-                <span className="font-semibold text-zinc-700">email</span>.
+              <div className="mt-2 text-xs text-rose-700">
+                <div className="mt-1">
+                  <span className="font-semibold">Required columns:</span> name, phone
+                </div>
+                <div className="mt-1">
+                  <span className="font-semibold">Optional columns:</span> email
+                </div>
+                <div className="mt-1">Extra columns will be ignored.</div>
+                <div className="mt-1">
+                  Use full phone numbers when possible, preferably with country code (example:{" "}
+                  <span className="font-semibold">+15551234567</span>).
+                </div>
               </div>
             </Field>
 
             {parseError ? (
               <div className="rounded-3xl bg-rose-50 p-4 text-sm text-rose-800 ring-1 ring-rose-200/70">
-                <div className="font-semibold text-rose-900">CSV issue</div>
+                <div className="font-semibold text-rose-900">File issue</div>
                 <div className="mt-1">{parseError}</div>
+                {missingNameRows.length || missingPhoneNames.length ? (
+                  <div className="mt-3">
+                    {missingNameRows.length ? (
+                      <>
+                        <div className="font-semibold text-rose-900">Missing name for:</div>
+                        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-rose-800">
+                          {missingNameRows.map((rowLabel, idx) => (
+                            <li key={`${rowLabel}-${idx}`}>{rowLabel}</li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : null}
+                    {missingPhoneNames.length ? (
+                      <>
+                        <div className={["font-semibold text-rose-900", missingNameRows.length ? "mt-3" : ""].join(" ")}>
+                          Missing phone number for:
+                        </div>
+                        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-rose-800">
+                          {missingPhoneNames.map((name, idx) => (
+                            <li key={`${name}-${idx}`}>{name}</li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : null}
+                    <div className="mt-3 text-sm text-rose-800">Please correct the file and upload again.</div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
             {parsedRows.length &&
-            (csvWarnings.duplicateCount ||
-              csvWarnings.missingPhoneCount ||
-              csvWarnings.missingEmailCount) ? (
+            (csvWarnings.duplicateCount || (csvWarnings.missingPhoneCount && !missingPhoneNames.length)) ? (
               <div className="rounded-3xl bg-amber-50 p-4 text-sm text-amber-900 ring-1 ring-amber-200/70">
                 <div className="font-semibold">Warnings</div>
                 <div className="mt-2 space-y-1 text-sm text-amber-900">
@@ -735,18 +857,11 @@ export function CandidateListsManager({
                       These candidates may receive duplicate calls.
                     </div>
                   ) : null}
-                  {csvWarnings.missingPhoneCount ? (
+                  {csvWarnings.missingPhoneCount && !missingPhoneNames.length ? (
                     <div>
                       Warning: {formatNumber(csvWarnings.missingPhoneCount)}{" "}
                       {csvWarnings.missingPhoneCount === 1 ? "row is" : "rows are"} missing phone
                       numbers. These candidates cannot be called unless phone numbers are added.
-                    </div>
-                  ) : null}
-                  {csvWarnings.missingEmailCount ? (
-                    <div>
-                      Warning: {formatNumber(csvWarnings.missingEmailCount)}{" "}
-                      {csvWarnings.missingEmailCount === 1 ? "row is" : "rows are"} missing email
-                      addresses. Email follow-up will not be available for those candidates.
                     </div>
                   ) : null}
                 </div>

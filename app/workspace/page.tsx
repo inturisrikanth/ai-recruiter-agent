@@ -57,68 +57,50 @@ export default async function WorkspacePage() {
             </div>
           </div>
 
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <div className="rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
-              <div className="text-sm font-semibold text-zinc-900">Campaigns</div>
-              <p className="mt-1 text-sm leading-6 text-zinc-600">
-                Define roles and keep everything scoped to a campaign.
-              </p>
-            </div>
-            <div className="rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
-              <div className="text-sm font-semibold text-zinc-900">Candidates</div>
-              <p className="mt-1 text-sm leading-6 text-zinc-600">
-                Add candidates, track stages, and prepare outreach.
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-6 border-t border-zinc-200/70 pt-5">
-            <h3 className="text-sm font-semibold text-zinc-900">Recommended workflow</h3>
-            <ol className="mt-3 space-y-3 text-sm text-zinc-700">
-              {[
-                "Create a campaign",
-                "Add candidates",
-                "Activate outreach",
-                "Review calls and reports",
-              ].map((step, i) => (
-                <li key={step} className="flex gap-3">
-                  <span className="mt-0.5 grid size-6 place-items-center rounded-full bg-white text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200/80">
-                    {i + 1}
-                  </span>
-                  <span className="font-medium text-zinc-900">{step}</span>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </div>
-      </section>
-
-      <section className="mt-6">
-        <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-zinc-200/70 sm:p-7">
-          <div className="flex items-end justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-zinc-900">Recent activity</h2>
-              <p className="mt-1 text-sm text-zinc-600">
-                A lightweight summary of what changed recently.
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-4 overflow-hidden rounded-3xl bg-zinc-50 ring-1 ring-zinc-200/70">
-            <div className="divide-y divide-zinc-200/70">
-              {recentActivity.map((a) => (
-                <div key={`${a.title}-${a.time}`} className="px-4 py-4 hover:bg-white/60">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-zinc-900">{a.title}</div>
-                      <div className="mt-1 text-sm leading-6 text-zinc-600">{a.detail}</div>
-                    </div>
-                    <div className="shrink-0 text-xs font-medium text-zinc-500">{a.time}</div>
-                  </div>
+          <ol className="mt-5 space-y-4 text-sm text-zinc-700">
+            {[
+              {
+                title: "Step 1 — Create a Campaign",
+                detail:
+                  "Create a recruiting campaign and enter the job title, role details, and hiring information you want to use for outreach.",
+              },
+              {
+                title: "Step 2 — Upload Candidates",
+                detail:
+                  "Add candidates manually or upload a CSV file containing candidate names, phone numbers, email addresses, and other relevant details.",
+              },
+              {
+                title: "Step 3 — Configure Call Setup",
+                detail:
+                  "Define the AI caller instructions, conversation flow, screening questions, and response handling for this campaign.",
+              },
+              {
+                title: "Step 4 — Review and Activate Outreach",
+                detail:
+                  "Review your campaign configuration, verify candidate counts, and start the outreach process.",
+              },
+              {
+                title: "Step 5 — Monitor Outreach Progress",
+                detail:
+                  "Track call activity, candidate responses, retries, callbacks, and outreach status in real time.",
+              },
+              {
+                title: "Step 6 — Review Reports and Results",
+                detail:
+                  "Analyze completed calls, candidate interest levels, transcripts, summaries, and campaign performance reports.",
+              },
+            ].map((step, i) => (
+              <li key={step.title} className="flex gap-3">
+                <span className="mt-0.5 grid size-6 place-items-center rounded-full bg-zinc-50 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200/80">
+                  {i + 1}
+                </span>
+                <div className="min-w-0">
+                  <div className="font-semibold text-zinc-900">{step.title}</div>
+                  <div className="mt-1 text-sm leading-6 text-zinc-600">{step.detail}</div>
                 </div>
-              ))}
-            </div>
-          </div>
+              </li>
+            ))}
+          </ol>
         </div>
       </section>
     </AppShell>
