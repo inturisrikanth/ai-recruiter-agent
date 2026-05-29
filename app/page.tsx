@@ -1,47 +1,317 @@
 import { AppShell } from "@/components/dashboard/AppShell";
 import { StatCard } from "@/components/dashboard/StatCard";
+import { supabase } from "@/lib/supabaseClient";
 import Link from "next/link";
+import { type ReactNode } from "react";
 
-export default function Home() {
+function formatCount(value: number | null | undefined, fallback = "—") {
+  if (value == null || Number.isNaN(value)) return fallback;
+  return Number(value).toLocaleString();
+}
+
+function formatRelativeTime(iso: string | null | undefined) {
+  const raw = String(iso ?? "").trim();
+  if (!raw) return "—";
+  const date = new Date(raw);
+  const ts = date.getTime();
+  if (Number.isNaN(ts)) return "—";
+
+  const diffMs = ts - Date.now();
+  const diffSec = Math.round(diffMs / 1000);
+  const absSec = Math.abs(diffSec);
+  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+
+  if (absSec < 45) return rtf.format(diffSec, "second");
+  const diffMin = Math.round(diffSec / 60);
+  if (Math.abs(diffMin) < 45) return rtf.format(diffMin, "minute");
+  const diffHr = Math.round(diffMin / 60);
+  if (Math.abs(diffHr) < 22) return rtf.format(diffHr, "hour");
+  const diffDay = Math.round(diffHr / 24);
+  if (Math.abs(diffDay) < 26) return rtf.format(diffDay, "day");
+  const diffMo = Math.round(diffDay / 30);
+  if (Math.abs(diffMo) < 11) return rtf.format(diffMo, "month");
+  const diffYr = Math.round(diffDay / 365);
+  return rtf.format(diffYr, "year");
+}
+
+export default async function Home() {
+  const [
+    { count: totalCampaignsCount },
+    { count: totalCandidatesCount },
+    { count: completedCallsCount },
+    { count: totalOutreachAttemptsCount },
+  ] = await Promise.all([
+    supabase.from("campaigns").select("id", { count: "exact", head: true }),
+    supabase.from("candidates").select("id", { count: "exact", head: true }),
+    supabase.from("campaign_call_candidates").select("id", { count: "exact", head: true }).in("call_status", ["completed", "done"]),
+    supabase.from("campaign_call_candidates").select("id", { count: "exact", head: true }),
+  ]);
+
   const stats = [
-    { label: "Active campaigns", value: "8", delta: "+2 this week" },
-    { label: "Candidates sourced", value: "1,284", delta: "+14% vs last week" },
-    { label: "Replies", value: "312", delta: "24.3% reply rate" },
-    { label: "Calls booked", value: "46", delta: "+9 this week" },
+    {
+      label: "Total Campaigns",
+      value: formatCount(totalCampaignsCount),
+      delta: "All campaigns",
+      accent: "indigo" as const,
+    },
+    {
+      label: "Total Candidates",
+      value: formatCount(totalCandidatesCount),
+      delta: "Uploaded candidates",
+      accent: "sky" as const,
+    },
+    {
+      label: "Completed Calls",
+      value: formatCount(completedCallsCount),
+      delta: "Finished conversations",
+      accent: "emerald" as const,
+    },
+    {
+      label: "Total Outreach Attempts",
+      value: formatCount(totalOutreachAttemptsCount),
+      delta: "Calls attempted",
+      accent: "amber" as const,
+    },
   ];
 
-  const today = [
-    {
-      title: "Review top matches",
-      detail: "12 new candidates scored 90+ for “Senior Full‑Stack Engineer”.",
-    },
-    {
-      title: "Send follow‑ups",
-      detail: "7 conversations are ready for a nudge to improve reply rate.",
-    },
-    {
-      title: "Prep call notes",
-      detail: "3 calls scheduled tomorrow—generate tailored question sets.",
-    },
-  ];
+  const [
+    { count: draftCampaignsCount },
+    { count: readyCampaignsCount },
+    { count: completedCampaignsCount },
+    { count: pausedOutreachCount },
+    { count: completedOutreachCount },
+    { data: completedSessions },
+  ] = await Promise.all([
+    supabase.from("campaigns").select("id", { count: "exact", head: true }).eq("status", "Draft"),
+    supabase.from("campaigns").select("id", { count: "exact", head: true }).eq("status", "Ready"),
+    supabase.from("campaigns").select("id", { count: "exact", head: true }).eq("status", "Completed"),
+    supabase
+      .from("campaign_call_sessions")
+      .select("id", { count: "exact", head: true })
+      .in("status", ["paused_manual", "paused_calling_window"]),
+    supabase.from("campaign_call_sessions").select("id", { count: "exact", head: true }).eq("status", "completed"),
+    supabase.from("campaign_call_sessions").select("campaign_id").eq("status", "completed").limit(50000),
+  ]);
 
-  const recentActivity = [
-    {
-      title: "New replies received",
-      detail: "6 candidates replied across 3 active campaigns.",
-      time: "2h ago",
-    },
-    {
-      title: "Call booked",
-      detail: "A 30‑min screening was scheduled for tomorrow at 11:00am.",
-      time: "6h ago",
-    },
-    {
-      title: "Campaign health improved",
-      detail: "Reply rate increased by 3.1% week over week.",
-      time: "Yesterday",
-    },
-  ];
+  const reportsAvailableCount = new Set(
+    ((completedSessions ?? []) as Array<{ campaign_id: unknown }>)
+      .map((r) => String(r.campaign_id ?? ""))
+      .filter(Boolean),
+  ).size;
+
+  const draftCount = Number(draftCampaignsCount ?? 0);
+  const readyCount = Number(readyCampaignsCount ?? 0);
+  const completedCount = Number(completedCampaignsCount ?? 0);
+  const setupCount = draftCount + readyCount;
+
+  const awaitingOutreachCount = Number(pausedOutreachCount ?? 0);
+  const outreachCompletedCount = Number(completedOutreachCount ?? 0);
+
+  const reportsCount = Number(reportsAvailableCount ?? 0);
+
+  const today: Array<{ title: string; detail: ReactNode; href: string }> = [];
+
+  if (setupCount > 0) {
+    today.push({
+      title: "Campaigns",
+      detail: (
+        <>
+          {completedCount > 0 ? <span className="block">{completedCount} completed</span> : null}
+          {draftCount > 0 ? <span className="block">{draftCount} draft</span> : null}
+          {readyCount > 0 ? <span className="block">{readyCount} ready</span> : null}
+        </>
+      ),
+      href: "/campaigns",
+    });
+  }
+
+  if (awaitingOutreachCount > 0) {
+    today.push({
+      title: "Outreach",
+      detail: (
+        <>
+          <span className="block">{outreachCompletedCount} completed</span>
+          <span className="block">{awaitingOutreachCount} awaiting action</span>
+        </>
+      ),
+      href: "/outreach",
+    });
+  }
+
+  if (reportsCount > 0) {
+    today.push({
+      title: "Reports",
+      detail: `${reportsCount} report${reportsCount === 1 ? "" : "s"} available`,
+      href: "/reports",
+    });
+  }
+
+  const [
+    { data: recentCampaigns },
+    { data: recentSessions },
+    { data: recentTerminalCalls },
+    { data: recentScheduledCalls },
+  ] = await Promise.all([
+    supabase.from("campaigns").select("id,campaign_name,created_at").order("created_at", { ascending: false }).limit(8),
+    supabase
+      .from("campaign_call_sessions")
+      .select("id,campaign_id,status,started_at,completed_at,updated_at,created_at")
+      .order("updated_at", { ascending: false })
+      .limit(12),
+    supabase
+      .from("campaign_call_candidates")
+      .select("id,campaign_id,candidate_name,call_status,call_completed_at,updated_at,created_at")
+      .in("call_status", ["completed", "failed", "no_answer"])
+      .order("call_completed_at", { ascending: false })
+      .limit(12),
+    supabase
+      .from("campaign_call_candidates")
+      .select("id,campaign_id,candidate_name,call_status,call_completed_at,updated_at,created_at")
+      .in("call_status", ["retry_scheduled", "callback_scheduled"])
+      .order("updated_at", { ascending: false })
+      .limit(12),
+  ]);
+
+  const activityCampaignIds = new Set<string>();
+  for (const c of (recentCampaigns ?? []) as Array<{ id: unknown }>) activityCampaignIds.add(String(c.id ?? ""));
+  for (const s of (recentSessions ?? []) as Array<{ campaign_id: unknown }>) activityCampaignIds.add(String(s.campaign_id ?? ""));
+  for (const r of (recentTerminalCalls ?? []) as Array<{ campaign_id: unknown }>) activityCampaignIds.add(String(r.campaign_id ?? ""));
+  for (const r of (recentScheduledCalls ?? []) as Array<{ campaign_id: unknown }>) activityCampaignIds.add(String(r.campaign_id ?? ""));
+  activityCampaignIds.delete("");
+
+  const { data: activityCampaignRows } = activityCampaignIds.size
+    ? await supabase
+        .from("campaigns")
+        .select("id,campaign_name")
+        .in("id", Array.from(activityCampaignIds))
+        .limit(5000)
+    : { data: [] as Array<{ id: unknown; campaign_name: unknown }> };
+
+  const campaignNameById = new Map<string, string>(
+    (activityCampaignRows ?? []).map((r) => [String(r.id ?? ""), String(r.campaign_name ?? "Campaign")]),
+  );
+
+  type ActivityItem = { title: string; detail: string; at: string };
+  const activityItems: ActivityItem[] = [];
+
+  for (const c of (recentCampaigns ?? []) as Array<{ id: unknown; campaign_name: unknown; created_at: unknown }>) {
+    const name = String(c.campaign_name ?? "Campaign");
+    const at = String(c.created_at ?? "");
+    if (!at) continue;
+    activityItems.push({
+      title: `Campaign "${name}" created`,
+      detail: "New campaign added.",
+      at,
+    });
+  }
+
+  for (const s of (recentSessions ?? []) as Array<{
+    campaign_id: unknown;
+    status: unknown;
+    started_at: unknown;
+    completed_at: unknown;
+    updated_at: unknown;
+    created_at: unknown;
+  }>) {
+    const campaignId = String(s.campaign_id ?? "");
+    const campaignName = campaignNameById.get(campaignId) ?? "Campaign";
+    const status = String(s.status ?? "").toLowerCase();
+
+    const startedAt = String(s.started_at ?? "");
+    if (startedAt) {
+      activityItems.push({
+        title: "Outreach started",
+        detail: `Campaign "${campaignName}"`,
+        at: startedAt,
+      });
+    }
+
+    if (status === "paused_manual") {
+      const at = String(s.updated_at ?? "");
+      if (at) {
+        activityItems.push({
+          title: "Outreach paused manually",
+          detail: `Campaign "${campaignName}"`,
+          at,
+        });
+      }
+    } else if (status === "paused_calling_window") {
+      const at = String(s.updated_at ?? "");
+      if (at) {
+        activityItems.push({
+          title: "Outreach paused (calling window)",
+          detail: `Campaign "${campaignName}"`,
+          at,
+        });
+      }
+    } else if (status === "stopped") {
+      const at = String(s.completed_at ?? s.updated_at ?? "");
+      if (at) {
+        activityItems.push({
+          title: "Outreach stopped",
+          detail: `Campaign "${campaignName}"`,
+          at,
+        });
+      }
+    } else if (status === "completed") {
+      const at = String(s.completed_at ?? s.updated_at ?? "");
+      if (at) {
+        activityItems.push({
+          title: "Outreach completed",
+          detail: `Campaign "${campaignName}"`,
+          at,
+        });
+      }
+    }
+  }
+
+  for (const r of (recentTerminalCalls ?? []) as Array<{
+    campaign_id: unknown;
+    candidate_name: unknown;
+    call_status: unknown;
+    call_completed_at: unknown;
+    updated_at: unknown;
+    created_at: unknown;
+  }>) {
+    const status = String(r.call_status ?? "").toLowerCase();
+    const candidateName = String(r.candidate_name ?? "Candidate") || "Candidate";
+    const campaignId = String(r.campaign_id ?? "");
+    const campaignName = campaignNameById.get(campaignId) ?? "Campaign";
+    const at = String(r.call_completed_at ?? "");
+    if (!at) continue;
+
+    if (status === "completed") {
+      activityItems.push({ title: `Call completed with "${candidateName}"`, detail: `Campaign "${campaignName}"`, at });
+    } else if (status === "failed") {
+      activityItems.push({ title: `Call failed for "${candidateName}"`, detail: `Campaign "${campaignName}"`, at });
+    } else if (status === "no_answer" || status === "no-answer") {
+      activityItems.push({ title: `No answer from "${candidateName}"`, detail: `Campaign "${campaignName}"`, at });
+    }
+  }
+
+  for (const r of (recentScheduledCalls ?? []) as Array<{
+    campaign_id: unknown;
+    candidate_name: unknown;
+    call_status: unknown;
+    updated_at: unknown;
+    created_at: unknown;
+  }>) {
+    const status = String(r.call_status ?? "").toLowerCase();
+    const candidateName = String(r.candidate_name ?? "Candidate") || "Candidate";
+    const campaignId = String(r.campaign_id ?? "");
+    const campaignName = campaignNameById.get(campaignId) ?? "Campaign";
+    const at = String(r.updated_at ?? r.created_at ?? "");
+    if (!at) continue;
+
+    if (status === "retry_scheduled") {
+      activityItems.push({ title: `Retry scheduled for "${candidateName}"`, detail: `Campaign "${campaignName}"`, at });
+    } else if (status === "callback_scheduled") {
+      activityItems.push({ title: `Callback scheduled for "${candidateName}"`, detail: `Campaign "${campaignName}"`, at });
+    }
+  }
+
+  activityItems.sort((a, b) => (a.at > b.at ? -1 : a.at < b.at ? 1 : 0));
+  const recentActivity = activityItems.slice(0, 9).map((a) => ({ title: a.title, detail: a.detail, time: formatRelativeTime(a.at) }));
 
   return (
     <AppShell
@@ -63,63 +333,29 @@ export default function Home() {
           </div>
 
           <div className="mt-4 grid gap-3">
-            {today.map((t) => (
-              <div
-                key={t.title}
-                className="rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-zinc-900">
-                      {t.title}
+            {today.length ? (
+              today.map((t) => (
+                <div key={t.title} className="rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-zinc-900">{t.title}</div>
+                      <div className="mt-1 text-sm leading-6 text-zinc-600">{t.detail}</div>
                     </div>
-                    <div className="mt-1 text-sm leading-6 text-zinc-600">
-                      {t.detail}
-                    </div>
+                    <Link
+                      href={t.href}
+                      className="shrink-0 rounded-2xl bg-white px-3 py-2 text-xs font-semibold text-zinc-900 shadow-sm ring-1 ring-zinc-200/70 hover:bg-zinc-50"
+                    >
+                      Open
+                    </Link>
                   </div>
-                  <button
-                    type="button"
-                    className="shrink-0 rounded-2xl bg-white px-3 py-2 text-xs font-semibold text-zinc-900 shadow-sm ring-1 ring-zinc-200/70 hover:bg-zinc-50"
-                  >
-                    Open
-                  </button>
                 </div>
+              ))
+            ) : (
+              <div className="rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
+                <div className="text-sm font-semibold text-zinc-900">You're all caught up.</div>
+                <div className="mt-1 text-sm leading-6 text-zinc-600">No pending actions right now.</div>
               </div>
-            ))}
-          </div>
-
-          <div className="mt-4">
-            <button
-              type="button"
-              className="inline-flex h-10 w-full items-center justify-center rounded-2xl bg-indigo-600 px-4 text-sm font-medium text-white shadow-sm ring-1 ring-indigo-500/20 hover:bg-indigo-500"
-            >
-              View my tasks
-            </button>
-          </div>
-
-          <div className="mt-5 rounded-3xl bg-white p-4 ring-1 ring-zinc-200/70">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold text-zinc-900">
-                  Weekly health
-                </div>
-                <div className="mt-1 text-sm text-zinc-600">
-                  Campaign performance is improving.
-                </div>
-              </div>
-              <div className="grid size-11 place-items-center rounded-2xl bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/70">
-                <span className="text-sm font-semibold">A</span>
-              </div>
-            </div>
-            <div className="mt-4">
-              <div className="flex items-center justify-between text-xs font-medium text-zinc-500">
-                <span>Reply rate</span>
-                <span className="text-zinc-700">24%</span>
-              </div>
-              <div className="mt-2 h-2 rounded-full bg-zinc-100">
-                <div className="h-2 w-[66%] rounded-full bg-emerald-500" />
-              </div>
-            </div>
+            )}
           </div>
         </div>
       }
@@ -159,15 +395,7 @@ export default function Home() {
               label={s.label}
               value={s.value}
               delta={s.delta}
-              accent={
-                s.label === "Active campaigns"
-                  ? "indigo"
-                  : s.label === "Candidates sourced"
-                    ? "sky"
-                    : s.label === "Replies"
-                      ? "emerald"
-                      : "amber"
-              }
+              accent={s.accent}
             />
           ))}
         </div>
@@ -181,33 +409,28 @@ export default function Home() {
               A quick rollup of what changed recently.
             </p>
           </div>
-          <Link
-            href="/workspace"
-            className="text-sm font-medium text-zinc-700 hover:text-zinc-900"
-          >
-            Open workspace
-          </Link>
         </div>
 
         <div className="mt-4 overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-zinc-200/70">
           <div className="divide-y divide-zinc-200/70">
-            {recentActivity.map((a) => (
-              <div key={a.title} className="px-4 py-4 hover:bg-zinc-50/60">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-zinc-900">
-                      {a.title}
+            {recentActivity.length ? (
+              recentActivity.map((a) => (
+                <div key={`${a.title}-${a.time}`} className="px-4 py-4 hover:bg-zinc-50/60">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-zinc-900">{a.title}</div>
+                      <div className="mt-1 text-sm leading-6 text-zinc-600">{a.detail}</div>
                     </div>
-                    <div className="mt-1 text-sm leading-6 text-zinc-600">
-                      {a.detail}
-                    </div>
-                  </div>
-                  <div className="shrink-0 text-xs font-medium text-zinc-500">
-                    {a.time}
+                    <div className="shrink-0 text-xs font-medium text-zinc-500">{a.time}</div>
                   </div>
                 </div>
+              ))
+            ) : (
+              <div className="px-4 py-6">
+                <div className="text-sm font-semibold text-zinc-900">No recent activity yet.</div>
+                <div className="mt-1 text-sm text-zinc-600">New campaigns and outreach events will appear here as they happen.</div>
               </div>
-            ))}
+            )}
           </div>
           <div className="border-t border-zinc-200/70 bg-white px-4 py-3 text-sm">
             <span className="text-zinc-600">
