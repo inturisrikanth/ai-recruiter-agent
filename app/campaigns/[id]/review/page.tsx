@@ -1,8 +1,8 @@
 import { CampaignActivateButton } from "@/components/campaigns/CampaignActivateButton";
 import { AppShell } from "@/components/dashboard/AppShell";
-import { supabase } from "@/lib/supabaseClient";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 // Ensure fresh data in production (avoid cached RSC/HTML).
 export const dynamic = "force-dynamic";
@@ -63,12 +63,19 @@ function normalizeEmail(value: string) {
 }
 
 export default async function CampaignReviewPage({ params }: { params: Promise<{ id: string }> }) {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
   const { id } = await params;
 
   const { data: campaignRow, error: campaignError } = await supabase
     .from("campaigns")
     .select("id,campaign_name,job_title,job_description,required_skills,employment_type,status,candidate_count,updated_at")
     .eq("id", id)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   if (campaignError) {
@@ -116,6 +123,7 @@ export default async function CampaignReviewPage({ params }: { params: Promise<{
     .from("campaign_candidate_lists")
     .select("list_id,created_at")
     .eq("campaign_id", id)
+    .eq("user_id", user.id)
     .order("created_at", { ascending: true });
 
   const attachedListIds = (attachedLinks ?? []).map((r) => String(r.list_id));
@@ -125,6 +133,7 @@ export default async function CampaignReviewPage({ params }: { params: Promise<{
     const { data } = await supabase
       .from("candidate_lists")
       .select("id,list_name,total_candidates")
+      .eq("user_id", user.id)
       .in("id", attachedListIds);
     attachedLists = (data ?? []) as Array<{ id: unknown; list_name: unknown; total_candidates: unknown }>;
   }
@@ -142,6 +151,7 @@ export default async function CampaignReviewPage({ params }: { params: Promise<{
     .from("call_configurations")
     .select("company_name,selected_questions,custom_questions,call_notes")
     .eq("campaign_id", id)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   const companyName = String(callConfig?.company_name ?? "").trim();
@@ -174,21 +184,25 @@ export default async function CampaignReviewPage({ params }: { params: Promise<{
         .from("candidates")
         .select("id", { count: "exact", head: true })
         .in("list_id", attachedListIds)
+        .eq("user_id", user.id)
         .is("phone", null),
       supabase
         .from("candidates")
         .select("id", { count: "exact", head: true })
         .in("list_id", attachedListIds)
+        .eq("user_id", user.id)
         .eq("phone", ""),
       supabase
         .from("candidates")
         .select("id", { count: "exact", head: true })
         .in("list_id", attachedListIds)
+        .eq("user_id", user.id)
         .is("email", null),
       supabase
         .from("candidates")
         .select("id", { count: "exact", head: true })
         .in("list_id", attachedListIds)
+        .eq("user_id", user.id)
         .eq("email", ""),
     ]);
 
@@ -199,6 +213,7 @@ export default async function CampaignReviewPage({ params }: { params: Promise<{
       .from("candidates")
       .select("phone,email")
       .in("list_id", attachedListIds)
+      .eq("user_id", user.id)
       .limit(5000);
 
     const seen = new Set<string>();

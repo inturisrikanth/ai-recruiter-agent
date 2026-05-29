@@ -1,8 +1,9 @@
 import { AppShell } from "@/components/dashboard/AppShell";
 import { CampaignReportCandidatesTable } from "@/components/reports/CampaignReportCandidatesTable";
 import { DownloadCampaignReportButton } from "@/components/reports/DownloadCampaignReportButton";
-import { supabase } from "@/lib/supabaseClient";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -99,6 +100,12 @@ export default async function ReportsPage({
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
   const sp = (await searchParams) ?? {};
   const campaignId = getFirstQueryValue(sp.campaignId);
 
@@ -106,6 +113,7 @@ export default async function ReportsPage({
     const { data: sessionsData, error: sessionsError } = await supabase
       .from("campaign_call_sessions")
       .select("id,campaign_id,status,total_candidates,completed_at,updated_at,created_at")
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(2000);
 
@@ -195,6 +203,7 @@ export default async function ReportsPage({
     const { data: campaignsData, error: campaignsError } = await supabase
       .from("campaigns")
       .select("id,campaign_name,job_title,status,updated_at")
+      .eq("user_id", user.id)
       .in("id", campaignIds);
 
     if (campaignsError) {
@@ -235,6 +244,7 @@ export default async function ReportsPage({
           .from("campaign_call_candidates")
           .select("call_session_id,call_status,retry_reason,last_error,updated_at,created_at")
           .in("call_session_id", sessionIds)
+          .eq("user_id", user.id)
           .limit(50000)
       : { data: [], error: null };
 
@@ -423,6 +433,7 @@ export default async function ReportsPage({
     .from("campaigns")
     .select("id,campaign_name,job_title,status,updated_at")
     .eq("id", campaignId)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   if (error || !campaign?.id) {
@@ -465,6 +476,7 @@ export default async function ReportsPage({
     .from("campaign_call_sessions")
     .select("id,status,total_candidates,completed_at,updated_at,created_at")
     .eq("campaign_id", campaignId)
+    .eq("user_id", user.id)
     .order("created_at", { ascending: false })
     .limit(50);
 
@@ -543,6 +555,7 @@ export default async function ReportsPage({
     .from("campaign_call_candidates")
     .select("id,candidate_name,candidate_phone,candidate_email,interest_status,call_status,updated_at,created_at")
     .eq("call_session_id", sessionId)
+    .eq("user_id", user.id)
     .order("candidate_name", { ascending: true })
     .limit(5000);
 

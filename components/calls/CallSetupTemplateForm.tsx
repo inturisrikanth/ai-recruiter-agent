@@ -1,6 +1,6 @@
 "use client";
 
-import { supabase } from "@/lib/supabaseClient";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   DEFAULT_SCREENING_QUESTIONS,
   Field,
@@ -42,6 +42,7 @@ export function CallSetupTemplateForm({
   initial?: CallSetupTemplateInitial | null;
   returnTo?: string | null;
 }) {
+  const supabase = getSupabaseBrowserClient();
   const router = useRouter();
 
   const initialSelected = useMemo(
@@ -123,8 +124,15 @@ export function CallSetupTemplateForm({
     const safeNotes = callNotes.trim();
 
     try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+      if (userError || !user) throw new Error(userError?.message ?? "You must be signed in to save templates.");
+
       if (mode === "create") {
         const { error: createErr } = await supabase.from("call_setup_templates").insert({
+          user_id: user.id,
           template_name: safeTemplateName,
           company_name: safeCompany,
           selected_questions: selectedQuestions,
@@ -143,7 +151,8 @@ export function CallSetupTemplateForm({
             custom_questions: custom,
             call_notes: safeNotes.length ? safeNotes : null,
           })
-          .eq("id", templateId);
+          .eq("id", templateId)
+          .eq("user_id", user.id);
         if (updateErr) throw updateErr;
       }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { supabase } from "@/lib/supabaseClient";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import Link from "next/link";
@@ -191,6 +191,7 @@ export function CandidateListsManager({
   initialAttachedListIds?: string[];
   initialAttachedLoadError?: string | null;
 }) {
+  const supabase = getSupabaseBrowserClient();
   const router = useRouter();
 
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -200,6 +201,7 @@ export function CandidateListsManager({
   const [parseError, setParseError] = useState<string | null>(null);
   const [missingNameRows, setMissingNameRows] = useState<string[]>([]);
   const [missingPhoneNames, setMissingPhoneNames] = useState<string[]>([]);
+  const [invalidPhoneEntries, setInvalidPhoneEntries] = useState<string[]>([]);
   const [csvWarnings, setCsvWarnings] = useState<CsvWarnings>({
     duplicateCount: 0,
     missingPhoneCount: 0,
@@ -234,6 +236,7 @@ export function CandidateListsManager({
     setParseError(null);
     setMissingNameRows([]);
     setMissingPhoneNames([]);
+    setInvalidPhoneEntries([]);
     setCsvWarnings({ duplicateCount: 0, missingPhoneCount: 0, missingEmailCount: 0 });
     setSaveError(null);
     setIsSaving(false);
@@ -308,6 +311,7 @@ export function CandidateListsManager({
     setParsedRows([]);
     setMissingNameRows([]);
     setMissingPhoneNames([]);
+    setInvalidPhoneEntries([]);
     setCsvWarnings({ duplicateCount: 0, missingPhoneCount: 0, missingEmailCount: 0 });
     setSaveError(null);
 
@@ -346,42 +350,78 @@ export function CandidateListsManager({
       return;
     }
 
-    const normalizePhone = (value: string) => value.trim().replace(/[\s\-()]/g, "");
+    const stripPhone = (value: string) => value.trim().replace(/[\s\-().]/g, "");
     const normalizeEmail = (value: string) => value.trim().toLowerCase();
+
+    const isE164 = (value: string) => /^\+[1-9]\d{1,14}$/.test(value);
+
+    function normalizeToE164(raw: string): string | null {
+      const trimmed = String(raw ?? "").trim();
+      if (!trimmed) return null;
+
+      const compact = stripPhone(trimmed);
+      if (!compact) return null;
+
+      // Already international format.
+      if (compact.startsWith("+")) {
+        if (isE164(compact)) return compact;
+        return null;
+      }
+
+      // US normalization fallback (10-digit or 11-digit starting with 1).
+      if (!/^\d+$/.test(compact)) return null;
+      if (compact.length === 10) return `+1${compact}`;
+      if (compact.length === 11 && compact.startsWith("1")) return `+${compact}`;
+      return null;
+    }
 
     let duplicateCount = 0;
     let missingPhoneCount = 0;
     let missingEmailCount = 0;
     const missingNames: string[] = [];
     const missingPhones: string[] = [];
+    const invalidPhones: string[] = [];
     const seen = new Set<string>();
+
+    const normalizedRows: ParsedCandidateRow[] = [];
 
     for (let i = 0; i < rows.length; i += 1) {
       const r = rows[i] as ParsedCandidateRow;
-      const phone = normalizePhone(r.phone);
+      const normalizedPhone = normalizeToE164(r.phone);
       const email = normalizeEmail(r.email);
 
       if (!r.name) {
         // Row numbers are 1-indexed, plus 1 for the header row.
         missingNames.push(`Row ${i + 2}`);
       }
-      if (!phone) {
+      if (!String(r.phone ?? "").trim()) {
         missingPhoneCount += 1;
         missingPhones.push(r.name || "Unnamed candidate");
       }
+      if (String(r.phone ?? "").trim() && !normalizedPhone) {
+        invalidPhones.push(r.name ? `${r.name}: ${r.phone}` : `Row ${i + 2}: ${r.phone}`);
+      }
       if (!email) missingEmailCount += 1;
 
-      const key = phone ? `p:${phone}` : email ? `e:${email}` : null;
+      const phoneKey = normalizedPhone ? normalizedPhone.replace(/^\+/, "") : "";
+      const key = phoneKey ? `p:${phoneKey}` : email ? `e:${email}` : null;
       if (!key) continue;
       if (seen.has(key)) duplicateCount += 1;
       else seen.add(key);
+
+      normalizedRows.push({
+        name: r.name,
+        phone: normalizedPhone ?? r.phone,
+        email: r.email,
+      });
     }
 
-    setParsedRows(rows);
-    if (missingNames.length || missingPhones.length) {
+    setParsedRows(normalizedRows.length ? normalizedRows : rows);
+    if (missingNames.length || missingPhones.length || invalidPhones.length) {
       setParseError("Cannot import candidate list.");
       setMissingNameRows(missingNames);
       setMissingPhoneNames(missingPhones);
+      setInvalidPhoneEntries(invalidPhones);
     }
     setCsvWarnings({ duplicateCount, missingPhoneCount, missingEmailCount });
   }
@@ -410,9 +450,18 @@ export function CandidateListsManager({
     setIsSaving(true);
     let createdListId: string | null = null;
     try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+      if (userError || !user) {
+        throw new Error(userError?.message ?? "You must be signed in to save candidate lists.");
+      }
+
       const { data: created, error: createErr } = await supabase
         .from("candidate_lists")
         .insert({
+          user_id: user.id,
           list_name: safeListName,
           source_file_name: file.name,
           total_candidates: 0,
@@ -425,6 +474,7 @@ export function CandidateListsManager({
 
       const candidateRows = parsedRows.map((r) => ({
         list_id: createdListId,
+        user_id: user.id,
         name: r.name,
         phone: r.phone,
         email: r.email,
@@ -438,7 +488,8 @@ export function CandidateListsManager({
       const { error: updateErr } = await supabase
         .from("candidate_lists")
         .update({ total_candidates: parsedRows.length })
-        .eq("id", createdListId);
+        .eq("id", createdListId)
+        .eq("user_id", user.id);
       if (updateErr) throw updateErr;
 
       closeModal();
@@ -447,7 +498,14 @@ export function CandidateListsManager({
       const message = e instanceof Error ? e.message : "Something went wrong while saving.";
       setSaveError(message);
       if (createdListId) {
-        await supabase.from("candidate_lists").delete().eq("id", createdListId);
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        await supabase
+          .from("candidate_lists")
+          .delete()
+          .eq("id", createdListId)
+          .eq("user_id", user?.id ?? "");
       }
     } finally {
       setIsSaving(false);
@@ -457,7 +515,16 @@ export function CandidateListsManager({
   async function onDeleteList(listId: string, label: string) {
     const ok = window.confirm(`Delete “${label}”? This will remove the list and all candidates in it.`);
     if (!ok) return;
-    const { error } = await supabase.from("candidate_lists").delete().eq("id", listId);
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+    if (userError || !user) {
+      window.alert(userError?.message ?? "You must be signed in to delete lists.");
+      return;
+    }
+
+    const { error } = await supabase.from("candidate_lists").delete().eq("id", listId).eq("user_id", user.id);
     if (error) {
       window.alert(error.message);
       return;
@@ -470,6 +537,14 @@ export function CandidateListsManager({
     setSelectionError(null);
     setIsSelectionSaving(true);
     try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+      if (userError || !user) {
+        throw new Error(userError?.message ?? "You must be signed in to attach candidate lists.");
+      }
+
       const selectedIds = Array.from(selected);
 
       const toRemove = Array.from(initialAttached).filter((id) => !selected.has(id));
@@ -479,13 +554,15 @@ export function CandidateListsManager({
         const { error: deleteAllErr } = await supabase
           .from("campaign_candidate_lists")
           .delete()
-          .eq("campaign_id", campaignId);
+          .eq("campaign_id", campaignId)
+          .eq("user_id", user.id);
         if (deleteAllErr) throw deleteAllErr;
 
         const { error: updateErr } = await supabase
           .from("campaigns")
           .update({ candidate_count: 0, updated_at: new Date().toISOString() })
-          .eq("id", campaignId);
+          .eq("id", campaignId)
+          .eq("user_id", user.id);
         if (updateErr) throw updateErr;
 
         router.push(`/campaigns/${encodeURIComponent(campaignId)}`);
@@ -498,12 +575,13 @@ export function CandidateListsManager({
           .from("campaign_candidate_lists")
           .delete()
           .eq("campaign_id", campaignId)
+          .eq("user_id", user.id)
           .in("list_id", toRemove);
         if (removeErr) throw removeErr;
       }
 
       if (toAdd.length) {
-        const rows = toAdd.map((listId) => ({ campaign_id: campaignId, list_id: listId }));
+        const rows = toAdd.map((listId) => ({ campaign_id: campaignId, list_id: listId, user_id: user.id }));
         const { error: addErr } = await supabase
           .from("campaign_candidate_lists")
           .upsert(rows, { onConflict: "campaign_id,list_id", ignoreDuplicates: true });
@@ -513,18 +591,20 @@ export function CandidateListsManager({
       const { data: lists, error: listsErr } = await supabase
         .from("candidate_lists")
         .select("id,total_candidates")
+        .eq("user_id", user.id)
         .in("id", selectedIds);
       if (listsErr) throw listsErr;
 
       const totalCandidates = (lists ?? []).reduce(
-        (sum, row) => sum + Number(row.total_candidates ?? 0),
+        (sum: number, row: { total_candidates: unknown }) => sum + Number(row.total_candidates ?? 0),
         0,
       );
 
       const { error: updateErr } = await supabase
         .from("campaigns")
         .update({ candidate_count: totalCandidates, updated_at: new Date().toISOString() })
-        .eq("id", campaignId);
+        .eq("id", campaignId)
+        .eq("user_id", user.id);
       if (updateErr) throw updateErr;
 
       router.push(`/campaigns/${encodeURIComponent(campaignId)}`);
@@ -791,6 +871,7 @@ export function CandidateListsManager({
                   setParseError(null);
                   setMissingNameRows([]);
                   setMissingPhoneNames([]);
+                  setInvalidPhoneEntries([]);
                   setCsvWarnings({ duplicateCount: 0, missingPhoneCount: 0, missingEmailCount: 0 });
                   setSaveError(null);
                   if (f) await parseFile(f);
@@ -804,10 +885,7 @@ export function CandidateListsManager({
                   <span className="font-semibold">Optional columns:</span> email
                 </div>
                 <div className="mt-1">Extra columns will be ignored.</div>
-                <div className="mt-1">
-                  Use full phone numbers when possible, preferably with country code (example:{" "}
-                  <span className="font-semibold">+15551234567</span>).
-                </div>
+                <div className="mt-1">Phone numbers can be uploaded as +11234567890 or 1234567890.</div>
               </div>
             </Field>
 
@@ -815,7 +893,7 @@ export function CandidateListsManager({
               <div className="rounded-3xl bg-rose-50 p-4 text-sm text-rose-800 ring-1 ring-rose-200/70">
                 <div className="font-semibold text-rose-900">File issue</div>
                 <div className="mt-1">{parseError}</div>
-                {missingNameRows.length || missingPhoneNames.length ? (
+                {missingNameRows.length || missingPhoneNames.length || invalidPhoneEntries.length ? (
                   <div className="mt-3">
                     {missingNameRows.length ? (
                       <>
@@ -837,6 +915,26 @@ export function CandidateListsManager({
                             <li key={`${name}-${idx}`}>{name}</li>
                           ))}
                         </ul>
+                      </>
+                    ) : null}
+                    {invalidPhoneEntries.length ? (
+                      <>
+                        <div
+                          className={[
+                            "font-semibold text-rose-900",
+                            missingNameRows.length || missingPhoneNames.length ? "mt-3" : "",
+                          ].join(" ")}
+                        >
+                          Invalid phone number:
+                        </div>
+                        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-rose-800">
+                          {invalidPhoneEntries.map((label, idx) => (
+                            <li key={`${label}-${idx}`}>{label}</li>
+                          ))}
+                        </ul>
+                        <div className="mt-3 text-sm text-rose-800">
+                          Please use full phone numbers with country code, for example <span className="font-semibold">+15551234567</span>.
+                        </div>
                       </>
                     ) : null}
                     <div className="mt-3 text-sm text-rose-800">Please correct the file and upload again.</div>

@@ -1,5 +1,5 @@
 import { startCallForCandidateRow } from "@/lib/outreach/startNextQueuedCall";
-import { supabase } from "@/lib/supabaseClient";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -7,6 +7,12 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const { id: campaignId } = await params;
 
   let payload: unknown = null;
@@ -23,6 +29,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .from("campaign_call_candidates")
     .select("id,campaign_id,call_session_id,call_status,attempt_count,max_attempts")
     .eq("id", candidateCallId)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -38,7 +45,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const sessionId = String(row.call_session_id ?? "");
   if (!sessionId) return NextResponse.json({ error: "Missing session id." }, { status: 409 });
 
-  const result = await startCallForCandidateRow({ campaignId, sessionId, candidateRowId: candidateCallId });
+  const result = await startCallForCandidateRow({ campaignId, sessionId, candidateRowId: candidateCallId, userId: user.id });
   if (!result.started) {
     const message =
       result.reason === "already_calling"

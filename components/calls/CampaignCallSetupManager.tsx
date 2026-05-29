@@ -1,7 +1,7 @@
 "use client";
 
 import { CallConfigurationForm, type CallConfigurationDraft } from "@/components/calls/CallConfigurationForm";
-import { supabase } from "@/lib/supabaseClient";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -61,6 +61,7 @@ export function CampaignCallSetupManager({
   templates: CallSetupTemplate[];
   initialConfig: CallConfigurationDraft | null;
 }) {
+  const supabase = getSupabaseBrowserClient();
   const router = useRouter();
 
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
@@ -92,6 +93,12 @@ export function CampaignCallSetupManager({
 
     setIsAttaching(true);
     try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+      if (userError || !user) throw new Error(userError?.message ?? "You must be signed in to attach templates.");
+
       const selectedQuestions = (selectedTemplate.selectedQuestions ?? []).map((q) => String(q ?? "").trim()).filter(Boolean);
       const customQuestions = (selectedTemplate.customQuestions ?? []).map((q) => String(q ?? "").trim()).filter(Boolean);
       const safeNotes = String(selectedTemplate.callNotes ?? "").trim();
@@ -101,6 +108,7 @@ export function CampaignCallSetupManager({
         .upsert(
           {
             campaign_id: campaignId,
+            user_id: user.id,
             company_name: safeCompany,
             selected_questions: selectedQuestions,
             custom_questions: customQuestions,

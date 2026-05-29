@@ -1,7 +1,7 @@
 "use client";
 
 import { StatCard } from "@/components/dashboard/StatCard";
-import { supabase } from "@/lib/supabaseClient";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -133,6 +133,7 @@ function selectClass() {
 }
 
 export function CampaignsManager({ campaigns }: { campaigns: Campaign[] }) {
+  const supabase = getSupabaseBrowserClient();
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<CampaignStatus | "All">("All");
@@ -417,7 +418,18 @@ export function CampaignsManager({ campaigns }: { campaigns: Campaign[] }) {
             setIsCreating(true);
             setCreateError(null);
 
+            const {
+              data: { user },
+              error: userError,
+            } = await supabase.auth.getUser();
+            if (userError || !user) {
+              setCreateError(userError?.message ?? "You must be signed in to create a campaign.");
+              setIsCreating(false);
+              return;
+            }
+
             const { error } = await supabase.from("campaigns").insert({
+              user_id: user.id,
               campaign_name: draft.campaignName.trim(),
               job_title: draft.jobTitle.trim(),
               job_description: draft.jobDescription.trim(),

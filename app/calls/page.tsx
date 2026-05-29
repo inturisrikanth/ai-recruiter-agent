@@ -4,7 +4,8 @@ import {
   CampaignCallSetupTemplatesSelector,
   type CallSetupTemplateRow as CampaignTemplateRow,
 } from "@/components/calls/CampaignCallSetupTemplatesSelector";
-import { supabase } from "@/lib/supabaseClient";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
 
 // Ensure fresh data in production (avoid static/cached HTML).
 export const dynamic = "force-dynamic";
@@ -25,6 +26,12 @@ export default async function CallsPage({
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
   const sp = (await searchParams) ?? {};
   const campaignId = getFirstQueryValue(sp.campaignId);
 
@@ -32,6 +39,7 @@ export default async function CallsPage({
     const { data, error } = await supabase
       .from("call_setup_templates")
       .select("id,template_name,company_name,selected_questions,custom_questions,created_at")
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -73,6 +81,7 @@ export default async function CallsPage({
   const { data: templatesData, error: templatesError } = await supabase
     .from("call_setup_templates")
     .select("id,template_name,company_name,selected_questions,custom_questions,call_notes,created_at,updated_at")
+    .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 
   const templates: CampaignTemplateRow[] = templatesError
@@ -91,6 +100,7 @@ export default async function CallsPage({
     .from("campaign_call_setup_templates")
     .select("call_setup_template_id")
     .eq("campaign_id", campaignId)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   const initialAttachedTemplateId =

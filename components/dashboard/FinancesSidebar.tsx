@@ -24,10 +24,10 @@ export function FinancesSidebar() {
   const [activeHash, setActiveHash] = useState<string>("");
 
   const items: FinancesItem[] = [
-    { label: "Transactions", href: "/finances#transactions", hash: "transactions" },
-    { label: "Withdrawals", href: "/finances#withdrawals", hash: "withdrawals" },
-    { label: "Expenses", href: "/finances#expenses", hash: "expenses" },
-    { label: "Invoices", href: "/finances#invoices", hash: "invoices" },
+    { label: "Buy credits", href: "/finances#buy-credits", hash: "buy-credits" },
+    { label: "Campaign usage", href: "/finances#campaign-usage", hash: "campaign-usage" },
+    { label: "Transactions", href: "/finances#transaction-history", hash: "transaction-history" },
+    { label: "Invoices", href: "/finances#invoices-receipts", hash: "invoices-receipts" },
   ];
 
   useEffect(() => {
@@ -48,7 +48,7 @@ export function FinancesSidebar() {
           {items.map((item) => {
             const active =
               pathname.startsWith("/finances") &&
-              (activeHash ? activeHash === item.hash : item.hash === "transactions");
+              (activeHash ? activeHash === item.hash : item.hash === "buy-credits");
             return (
               <Link key={item.label} href={item.href} className={itemClass(active)}>
                 <span className="flex items-center gap-2">

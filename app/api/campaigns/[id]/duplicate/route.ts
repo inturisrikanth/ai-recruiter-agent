@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabaseClient";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
 function nowIso() {
@@ -16,6 +16,12 @@ function chunk<T>(arr: T[], size: number) {
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const { id: sourceCampaignId } = await params;
 
   let payload: unknown = null;
@@ -42,6 +48,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .from("campaigns")
     .select("id,campaign_name,job_title,job_description,required_skills,employment_type")
     .eq("id", sourceCampaignId)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   if (sourceError) return NextResponse.json({ error: sourceError.message }, { status: 500 });
@@ -52,6 +59,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .from("campaigns")
     .select("id")
     .eq("campaign_name", newCampaignName)
+    .eq("user_id", user.id)
     .limit(1);
   if (nameError) return NextResponse.json({ error: nameError.message }, { status: 500 });
   if ((existingByName ?? []).length) {
@@ -73,6 +81,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const { data: createdCampaign, error: createCampaignError } = await supabase
       .from("campaigns")
       .insert({
+        user_id: user.id,
         campaign_name: newCampaignName,
         job_title: jobTitle,
         job_description: jobDescription,
@@ -100,6 +109,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         .from("call_configurations")
         .select("company_name,selected_questions,custom_questions,call_notes")
         .eq("campaign_id", sourceCampaignId)
+        .eq("user_id", user.id)
         .maybeSingle();
 
       if (callConfigError) return NextResponse.json({ error: callConfigError.message }, { status: 500 });
@@ -110,6 +120,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           .upsert(
             {
               campaign_id: newCampaignId,
+              user_id: user.id,
               company_name: sourceCallConfig.company_name ? String(sourceCallConfig.company_name) : null,
               selected_questions: Array.isArray(sourceCallConfig.selected_questions) ? sourceCallConfig.selected_questions : [],
               custom_questions: Array.isArray(sourceCallConfig.custom_questions) ? sourceCallConfig.custom_questions : [],
@@ -128,7 +139,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       const { data: attachedLinks, error: attachedError } = await supabase
         .from("campaign_candidate_lists")
         .select("list_id")
-        .eq("campaign_id", sourceCampaignId);
+        .eq("campaign_id", sourceCampaignId)
+        .eq("user_id", user.id);
       if (attachedError) return NextResponse.json({ error: attachedError.message }, { status: 500 });
 
       const sourceListIds = (attachedLinks ?? []).map((r) => String(r.list_id)).filter(Boolean);
@@ -136,6 +148,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         const { data: sourceLists, error: sourceListsError } = await supabase
           .from("candidate_lists")
           .select("id,list_name,source_file_name")
+          .eq("user_id", user.id)
           .in("id", sourceListIds);
         if (sourceListsError) return NextResponse.json({ error: sourceListsError.message }, { status: 500 });
 
@@ -149,6 +162,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           const { data: newList, error: newListError } = await supabase
             .from("candidate_lists")
             .insert({
+              user_id: user.id,
               list_name: `${listName} (Copy)`,
               source_file_name: sourceFileName,
               total_candidates: 0,
@@ -164,11 +178,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             .from("candidates")
             .select("name,phone,email")
             .eq("list_id", sourceListId)
+            .eq("user_id", user.id)
             .limit(50000);
           if (sourceCandidatesError) return NextResponse.json({ error: sourceCandidatesError.message }, { status: 500 });
 
           const rows = (sourceCandidates ?? []).map((c) => ({
             list_id: newListId,
+            user_id: user.id,
             name: String((c as { name?: unknown }).name ?? "").trim(),
             phone: String((c as { phone?: unknown }).phone ?? "").trim(),
             email: String((c as { email?: unknown }).email ?? "").trim(),
@@ -185,19 +201,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           const { error: updateListErr } = await supabase
             .from("candidate_lists")
             .update({ total_candidates: count })
-            .eq("id", newListId);
+            .eq("id", newListId)
+            .eq("user_id", user.id);
           if (updateListErr) return NextResponse.json({ error: updateListErr.message }, { status: 500 });
 
           const { error: linkErr } = await supabase
             .from("campaign_candidate_lists")
-            .upsert({ campaign_id: newCampaignId, list_id: newListId }, { onConflict: "campaign_id,list_id", ignoreDuplicates: true });
+            .upsert(
+              { campaign_id: newCampaignId, list_id: newListId, user_id: user.id },
+              { onConflict: "campaign_id,list_id", ignoreDuplicates: true },
+            );
           if (linkErr) return NextResponse.json({ error: linkErr.message }, { status: 500 });
         }
 
         const { error: updateCampaignErr } = await supabase
           .from("campaigns")
           .update({ candidate_count: totalCandidates, updated_at: createdAt })
-          .eq("id", newCampaignId);
+          .eq("id", newCampaignId)
+          .eq("user_id", user.id);
         if (updateCampaignErr) return NextResponse.json({ error: updateCampaignErr.message }, { status: 500 });
       }
     }
@@ -207,10 +228,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const message = e instanceof Error ? e.message : "Couldn’t duplicate campaign.";
     // Best-effort cleanup.
     if (newCampaignId) {
-      await supabase.from("campaigns").delete().eq("id", newCampaignId);
+      await supabase.from("campaigns").delete().eq("id", newCampaignId).eq("user_id", user.id);
     }
     if (createdListIds.length) {
-      await supabase.from("candidate_lists").delete().in("id", createdListIds);
+      await supabase.from("candidate_lists").delete().in("id", createdListIds).eq("user_id", user.id);
     }
     return NextResponse.json({ error: message }, { status: 500 });
   }

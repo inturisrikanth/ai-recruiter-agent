@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabaseClient";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
 function escapeHtml(value: unknown) {
@@ -294,6 +294,12 @@ function buildWordHtmlDocument(opts: {
 }
 
 export async function GET(request: Request) {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const url = new URL(request.url);
   const campaignId = String(url.searchParams.get("campaignId") ?? "");
 
@@ -303,6 +309,7 @@ export async function GET(request: Request) {
     .from("campaigns")
     .select("id,campaign_name,job_title,status,updated_at")
     .eq("id", campaignId)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   if (campaignError) return NextResponse.json({ error: campaignError.message }, { status: 500 });
@@ -312,6 +319,7 @@ export async function GET(request: Request) {
     .from("campaign_call_sessions")
     .select("id,status,total_candidates,completed_at,updated_at,created_at")
     .eq("campaign_id", campaignId)
+    .eq("user_id", user.id)
     .order("created_at", { ascending: false })
     .limit(50);
 
@@ -332,6 +340,7 @@ export async function GET(request: Request) {
       "id,candidate_name,candidate_phone,candidate_email,interest_status,call_status,call_completed_at,updated_at,created_at,transcript",
     )
     .eq("call_session_id", sessionId)
+    .eq("user_id", user.id)
     .order("candidate_name", { ascending: true })
     .limit(5000);
 

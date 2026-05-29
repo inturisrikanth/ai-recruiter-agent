@@ -1,6 +1,6 @@
 "use client";
 
-import { supabase } from "@/lib/supabaseClient";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -59,6 +59,7 @@ export function CallSetupTemplatesManager({
 }: {
   initialTemplates: CallSetupTemplateRow[];
 }) {
+  const supabase = getSupabaseBrowserClient();
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
   const renderedTemplates = useMemo(() => initialTemplates, [initialTemplates]);
@@ -67,7 +68,17 @@ export function CallSetupTemplatesManager({
     const ok = window.confirm(`Delete “${label}”? This will remove the reusable template only.`);
     if (!ok) return;
     setIsDeleting(templateId);
-    const { error } = await supabase.from("call_setup_templates").delete().eq("id", templateId);
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+    if (userError || !user) {
+      setIsDeleting(null);
+      window.alert(userError?.message ?? "You must be signed in to delete templates.");
+      return;
+    }
+
+    const { error } = await supabase.from("call_setup_templates").delete().eq("id", templateId).eq("user_id", user.id);
     setIsDeleting(null);
     if (error) {
       window.alert(error.message);

@@ -3,7 +3,8 @@ import {
   CandidateListsManager,
   type CandidateList,
 } from "@/components/candidates/CandidateListsManager";
-import { supabase } from "@/lib/supabaseClient";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
 
 // Ensure fresh data in production (avoid static/cached HTML).
 export const dynamic = "force-dynamic";
@@ -19,12 +20,19 @@ export default async function CandidatesPage({
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
   const sp = (await searchParams) ?? {};
   const campaignId = getFirstQueryValue(sp.campaignId);
 
   const { data, error } = await supabase
     .from("candidate_lists")
     .select("id,list_name,source_file_name,total_candidates,created_at")
+    .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -61,7 +69,8 @@ export default async function CandidatesPage({
     const { data: attached, error: attachedErr } = await supabase
       .from("campaign_candidate_lists")
       .select("list_id")
-      .eq("campaign_id", campaignId);
+      .eq("campaign_id", campaignId)
+      .eq("user_id", user.id);
     if (attachedErr) {
       attachedLoadError = attachedErr.message;
     } else {

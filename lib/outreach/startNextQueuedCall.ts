@@ -1,6 +1,6 @@
-import { supabase } from "@/lib/supabaseClient";
 import { buildRecruiterDynamicVariables } from "@/lib/retell/buildRecruiterDynamicVariables";
 import { retellCreatePhoneCall } from "@/lib/retell/retellClient";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 function isE164(value: string) {
   return /^\+[1-9]\d{1,14}$/.test(value);
@@ -59,23 +59,28 @@ export async function startCallForCandidateRow(opts: {
   sessionId: string;
   candidateRowId: string;
   allowStatuses?: string[];
+  userId?: string;
 }): Promise<StartNextCallResult> {
-  const { campaignId, sessionId, candidateRowId, allowStatuses = ["queued", "retry_scheduled", "callback_scheduled"] } = opts;
+  const supabase = await createSupabaseServerClient();
+  const { campaignId, sessionId, candidateRowId, allowStatuses = ["queued", "retry_scheduled", "callback_scheduled"], userId } = opts;
 
   // Safety: never run concurrent outbound calls for a session.
-  const { count: activeCount, error: activeCountError } = await supabase
+  let activeCountQuery = supabase
     .from("campaign_call_candidates")
     .select("id", { count: "exact", head: true })
     .eq("call_session_id", sessionId)
     .in("call_status", ["calling", "running", "in_progress"]);
+  if (userId) activeCountQuery = activeCountQuery.eq("user_id", userId);
+  const { count: activeCount, error: activeCountError } = await activeCountQuery;
   if (activeCountError) return { started: false, reason: "retell_failed" };
   if (Number(activeCount ?? 0) > 0) return { started: false, reason: "already_calling" };
 
-  const { data: sessionRow, error: sessionLoadError } = await supabase
+  let sessionLoadQuery = supabase
     .from("campaign_call_sessions")
     .select("id,status")
-    .eq("id", sessionId)
-    .maybeSingle();
+    .eq("id", sessionId);
+  if (userId) sessionLoadQuery = sessionLoadQuery.eq("user_id", userId);
+  const { data: sessionRow, error: sessionLoadError } = await sessionLoadQuery.maybeSingle();
   if (sessionLoadError) return { started: false, reason: "retell_failed" };
   if (!sessionRow?.id) return { started: false, reason: "no_active_session" };
 
@@ -84,18 +89,20 @@ export async function startCallForCandidateRow(opts: {
     return { started: false, reason: "paused_or_stopped" };
   }
 
-  const { data: campaignRow, error: campaignLoadError } = await supabase
+  let campaignLoadQuery = supabase
     .from("campaigns")
     .select("campaign_name,job_title,job_description,employment_type,required_skills")
-    .eq("id", campaignId)
-    .maybeSingle();
+    .eq("id", campaignId);
+  if (userId) campaignLoadQuery = campaignLoadQuery.eq("user_id", userId);
+  const { data: campaignRow, error: campaignLoadError } = await campaignLoadQuery.maybeSingle();
   if (campaignLoadError) return { started: false, reason: "retell_failed" };
 
-  const { data: callConfigRow } = await supabase
+  let callConfigQuery = supabase
     .from("call_configurations")
     .select("company_name,selected_questions,custom_questions,call_notes")
-    .eq("campaign_id", campaignId)
-    .maybeSingle();
+    .eq("campaign_id", campaignId);
+  if (userId) callConfigQuery = callConfigQuery.eq("user_id", userId);
+  const { data: callConfigRow } = await callConfigQuery.maybeSingle();
 
   const companyName = String(callConfigRow?.company_name ?? "").trim() || null;
   const selectedQuestions = Array.isArray(callConfigRow?.selected_questions)
@@ -106,11 +113,12 @@ export async function startCallForCandidateRow(opts: {
     : [];
   const callNotes = String(callConfigRow?.call_notes ?? "").trim() || null;
 
-  const { data: candidate, error: candidateError } = await supabase
+  let candidateLoadQuery = supabase
     .from("campaign_call_candidates")
     .select("id,candidate_id,candidate_name,candidate_phone,attempt_count,max_attempts,call_status")
-    .eq("id", candidateRowId)
-    .maybeSingle();
+    .eq("id", candidateRowId);
+  if (userId) candidateLoadQuery = candidateLoadQuery.eq("user_id", userId);
+  const { data: candidate, error: candidateError } = await candidateLoadQuery.maybeSingle();
   if (candidateError) return { started: false, reason: "retell_failed" };
   if (!candidate?.id) return { started: false, reason: "no_queued_candidates" };
 
@@ -127,7 +135,7 @@ export async function startCallForCandidateRow(opts: {
 
   if (!rawPhone || !isE164(rawPhone)) {
     const message = rawPhone ? `Invalid phone number (expected E.164): ${rawPhone}` : "Missing phone number";
-    await supabase
+    let invalidPhoneUpdate = supabase
       .from("campaign_call_candidates")
       .update({
         call_status: "failed",
@@ -139,12 +147,14 @@ export async function startCallForCandidateRow(opts: {
         updated_at: attemptAt,
       })
       .eq("id", candidateRowId);
+    if (userId) invalidPhoneUpdate = invalidPhoneUpdate.eq("user_id", userId);
+    await invalidPhoneUpdate;
     return { started: false, reason: "retell_failed" };
   }
 
   // Mark "calling" first to reduce double-dial risk.
   const preMarkAt = nowIso();
-  const { data: preMarked, error: preMarkError } = await supabase
+  let preMarkQuery = supabase
     .from("campaign_call_candidates")
     .update({
       call_status: "calling",
@@ -159,6 +169,8 @@ export async function startCallForCandidateRow(opts: {
     .eq("id", candidateRowId)
     .in("call_status", allowStatuses)
     .select("id");
+  if (userId) preMarkQuery = preMarkQuery.eq("user_id", userId);
+  const { data: preMarked, error: preMarkError } = await preMarkQuery;
 
   if (preMarkError) return { started: false, reason: "retell_failed" };
   if (!preMarked?.length) return { started: false, reason: "already_calling" };
@@ -205,24 +217,41 @@ export async function startCallForCandidateRow(opts: {
     });
 
     const afterAt = nowIso();
+    const updateCandidateAfterCall = userId
+      ? supabase
+          .from("campaign_call_candidates")
+          .update({
+            retell_call_id: String(retellRes.call_id),
+            retell_call_status: String(retellRes.call_status ?? "registered"),
+            last_error: null,
+            updated_at: afterAt,
+          })
+          .eq("id", candidateRowId)
+          .eq("user_id", userId)
+      : supabase
+          .from("campaign_call_candidates")
+          .update({
+            retell_call_id: String(retellRes.call_id),
+            retell_call_status: String(retellRes.call_status ?? "registered"),
+            last_error: null,
+            updated_at: afterAt,
+          })
+          .eq("id", candidateRowId);
+
+    const updateSessionAfterCall = userId
+      ? supabase.from("campaign_call_sessions").update({ status: "running", updated_at: afterAt }).eq("id", sessionId).eq("user_id", userId)
+      : supabase.from("campaign_call_sessions").update({ status: "running", updated_at: afterAt }).eq("id", sessionId);
+
     await Promise.all([
-      supabase
-        .from("campaign_call_candidates")
-        .update({
-          retell_call_id: String(retellRes.call_id),
-          retell_call_status: String(retellRes.call_status ?? "registered"),
-          last_error: null,
-          updated_at: afterAt,
-        })
-        .eq("id", candidateRowId),
-      supabase.from("campaign_call_sessions").update({ status: "running", updated_at: afterAt }).eq("id", sessionId),
+      updateCandidateAfterCall,
+      updateSessionAfterCall,
     ]);
 
     return { started: true, candidateRowId, retellCallId: String(retellRes.call_id), retellCallStatus: String(retellRes.call_status ?? "") || null };
   } catch (e) {
     const message = e instanceof Error ? e.message : "Retell call failed.";
     const failAt = nowIso();
-    await supabase
+    let failUpdateQuery = supabase
       .from("campaign_call_candidates")
       .update({
         call_status: "failed",
@@ -232,28 +261,34 @@ export async function startCallForCandidateRow(opts: {
         updated_at: failAt,
       })
       .eq("id", candidateRowId);
+    if (userId) failUpdateQuery = failUpdateQuery.eq("user_id", userId);
+    await failUpdateQuery;
     return { started: false, reason: "retell_failed" };
   }
 }
 
-export async function startNextQueuedCall(opts: { campaignId: string; sessionId: string }): Promise<StartNextCallResult> {
-  const { campaignId, sessionId } = opts;
+export async function startNextQueuedCall(opts: { campaignId: string; sessionId: string; userId?: string }): Promise<StartNextCallResult> {
+  const supabase = await createSupabaseServerClient();
+  const { campaignId, sessionId, userId } = opts;
 
   // Safety: never run concurrent outbound calls for a session.
-  const { count: activeCount, error: activeCountError } = await supabase
+  let activeCountQuery = supabase
     .from("campaign_call_candidates")
     .select("id", { count: "exact", head: true })
     .eq("call_session_id", sessionId)
     .in("call_status", ["calling", "running", "in_progress"]);
+  if (userId) activeCountQuery = activeCountQuery.eq("user_id", userId);
+  const { count: activeCount, error: activeCountError } = await activeCountQuery;
 
   if (activeCountError) return { started: false, reason: "retell_failed" };
   if (Number(activeCount ?? 0) > 0) return { started: false, reason: "already_calling" };
 
-  const { data: sessionRow, error: sessionLoadError } = await supabase
+  let sessionLoadQuery = supabase
     .from("campaign_call_sessions")
     .select("id,status")
-    .eq("id", sessionId)
-    .maybeSingle();
+    .eq("id", sessionId);
+  if (userId) sessionLoadQuery = sessionLoadQuery.eq("user_id", userId);
+  const { data: sessionRow, error: sessionLoadError } = await sessionLoadQuery.maybeSingle();
 
   if (sessionLoadError) return { started: false, reason: "retell_failed" };
   if (!sessionRow?.id) return { started: false, reason: "no_active_session" };
@@ -264,20 +299,22 @@ export async function startNextQueuedCall(opts: { campaignId: string; sessionId:
   }
 
   for (let i = 0; i < 25; i += 1) {
-    const { data: queued, error: queuedError } = await supabase
+    let queuedQuery = supabase
       .from("campaign_call_candidates")
       .select("id,candidate_id,candidate_name,candidate_phone,attempt_count,created_at")
       .eq("call_session_id", sessionId)
       .eq("call_status", "queued")
       .order("created_at", { ascending: true })
       .limit(1)
-      .maybeSingle();
+      ;
+    if (userId) queuedQuery = queuedQuery.eq("user_id", userId);
+    const { data: queued, error: queuedError } = await queuedQuery.maybeSingle();
 
     if (queuedError) return { started: false, reason: "retell_failed" };
     if (!queued?.id) return { started: false, reason: "no_queued_candidates" };
 
     const candidateRowId = String(queued.id);
-    const started = await startCallForCandidateRow({ campaignId, sessionId, candidateRowId, allowStatuses: ["queued"] });
+    const started = await startCallForCandidateRow({ campaignId, sessionId, candidateRowId, allowStatuses: ["queued"], userId });
     if (started.started) return started;
     if (started.reason === "already_calling") return started;
     if (started.reason === "paused_or_stopped") return started;

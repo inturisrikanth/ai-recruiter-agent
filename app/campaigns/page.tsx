@@ -1,6 +1,7 @@
 import { AppShell } from "@/components/dashboard/AppShell";
 import { CampaignsManager, type Campaign } from "@/components/campaigns/CampaignsManager";
-import { supabase } from "@/lib/supabaseClient";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
 
 // Ensure fresh data in production (avoid static/cached HTML).
 export const dynamic = "force-dynamic";
@@ -23,11 +24,18 @@ function normalizeEmploymentType(value: string): EmploymentType {
 }
 
 export default async function CampaignsPage() {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
   const { data, error } = await supabase
     .from("campaigns")
     .select(
       "id,campaign_name,job_title,job_description,required_skills,employment_type,status,candidate_count,created_at",
     )
+    .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 
   if (error) {

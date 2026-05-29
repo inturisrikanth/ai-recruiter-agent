@@ -1,39 +1,6 @@
 import { AppShell } from "@/components/dashboard/AppShell";
-import { supabase } from "@/lib/supabaseClient";
-
-function formatDate(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
 
 export default async function WorkspacePage() {
-  const { data } = await supabase
-    .from("campaigns")
-    .select("campaign_name,status,candidate_count,created_at")
-    .order("created_at", { ascending: false })
-    .limit(6);
-
-  const campaigns = (data ?? []).map((c) => ({
-    name: String(c.campaign_name ?? "Campaign"),
-    status: String(c.status ?? "Draft"),
-    createdAt: String(c.created_at ?? new Date().toISOString()),
-  }));
-
-  const recentActivity =
-    campaigns.length > 0
-      ? campaigns.slice(0, 4).map((c) => ({
-          title: "Campaign created",
-          detail: c.name,
-          time: formatDate(c.createdAt),
-        }))
-      : [
-          {
-            title: "No recent activity",
-            detail: "Create a campaign to start tracking your workflow.",
-            time: "—",
-          },
-        ];
-
   return (
     <AppShell>
       <header className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-zinc-200/70 sm:p-7">

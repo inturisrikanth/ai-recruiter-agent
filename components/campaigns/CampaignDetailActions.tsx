@@ -1,6 +1,6 @@
 "use client";
 
-import { supabase } from "@/lib/supabaseClient";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { DuplicateCampaignAction } from "@/components/campaigns/DuplicateCampaignAction";
@@ -232,6 +232,7 @@ function EditCampaignModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const supabase = getSupabaseBrowserClient();
   const [campaignName, setCampaignName] = useState(initial.campaignName);
   const [jobTitle, setJobTitle] = useState(initial.jobTitle);
   const [jobDescription, setJobDescription] = useState(initial.jobDescription);
@@ -263,6 +264,16 @@ function EditCampaignModal({
           setIsSaving(true);
           setError(null);
 
+          const {
+            data: { user },
+            error: userError,
+          } = await supabase.auth.getUser();
+          if (userError || !user) {
+            setError(userError?.message ?? "You must be signed in to edit campaigns.");
+            setIsSaving(false);
+            return;
+          }
+
           const { error } = await supabase
             .from("campaigns")
             .update({
@@ -273,7 +284,8 @@ function EditCampaignModal({
               employment_type: employmentType,
               updated_at: new Date().toISOString(),
             })
-            .eq("id", campaignId);
+            .eq("id", campaignId)
+            .eq("user_id", user.id);
 
           if (error) {
             setError(error.message);
@@ -381,6 +393,7 @@ function DeleteCampaignModal({
   onClose: () => void;
   onDeleted: () => void;
 }) {
+  const supabase = getSupabaseBrowserClient();
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -422,7 +435,17 @@ function DeleteCampaignModal({
           onClick={async () => {
             setIsDeleting(true);
             setError(null);
-            const { error } = await supabase.from("campaigns").delete().eq("id", campaignId);
+            const {
+              data: { user },
+              error: userError,
+            } = await supabase.auth.getUser();
+            if (userError || !user) {
+              setError(userError?.message ?? "You must be signed in to delete campaigns.");
+              setIsDeleting(false);
+              return;
+            }
+
+            const { error } = await supabase.from("campaigns").delete().eq("id", campaignId).eq("user_id", user.id);
             if (error) {
               setError(error.message);
               setIsDeleting(false);

@@ -3,9 +3,9 @@ import { OutreachControls } from "@/components/outreach/OutreachControls";
 import { ContinueAnywayButton } from "@/components/outreach/ContinueAnywayButton";
 import { RetryNowButton } from "@/components/outreach/RetryNowButton";
 import { getCallingWindowState } from "@/lib/callingWindow";
-import { supabase } from "@/lib/supabaseClient";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 // Ensure fresh data in production (avoid static/cached HTML).
 export const dynamic = "force-dynamic";
@@ -158,6 +158,12 @@ export default async function OutreachPage({
 }: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
   const sp = (await searchParams) ?? {};
   const campaignId = getFirstQueryValue(sp.campaignId);
 
@@ -165,6 +171,7 @@ export default async function OutreachPage({
     const { data: sessionsData, error: sessionsError } = await supabase
       .from("campaign_call_sessions")
       .select("id,campaign_id,status,total_candidates,updated_at,created_at")
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(2000);
 
@@ -243,6 +250,7 @@ export default async function OutreachPage({
     const { data: campaignsData, error: campaignsError } = await supabase
       .from("campaigns")
       .select("id,campaign_name,job_title,status,updated_at")
+      .eq("user_id", user.id)
       .in("id", campaignIds);
 
     if (campaignsError) {
@@ -421,6 +429,7 @@ export default async function OutreachPage({
     .from("campaigns")
     .select("id,campaign_name,status")
     .eq("id", campaignId)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   if (campaignError) {
@@ -461,6 +470,7 @@ export default async function OutreachPage({
     .from("campaign_call_sessions")
     .select("id,status,total_candidates,started_at,completed_at,created_at")
     .eq("campaign_id", campaignId)
+    .eq("user_id", user.id)
     .in("status", activeSessionStatuses)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -471,6 +481,7 @@ export default async function OutreachPage({
         .from("campaign_call_sessions")
         .select("id,status,total_candidates,started_at,completed_at,created_at")
         .eq("campaign_id", campaignId)
+        .eq("user_id", user.id)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle()
@@ -510,6 +521,7 @@ export default async function OutreachPage({
           "id,candidate_name,candidate_phone,candidate_email,call_status,call_completed_at,last_error,attempt_count,max_attempts,next_retry_at,retry_reason,updated_at,created_at",
         )
         .eq("call_session_id", sessionId)
+        .eq("user_id", user.id)
         .order("candidate_name", { ascending: true })
         .limit(5000)
     : { data: null, error: null };

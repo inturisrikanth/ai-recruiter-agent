@@ -1,8 +1,8 @@
 import { AppShell } from "@/components/dashboard/AppShell";
 import { CallSetupTemplateForm, type CallSetupTemplateInitial } from "@/components/calls/CallSetupTemplateForm";
-import { supabase } from "@/lib/supabaseClient";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -24,6 +24,12 @@ export default async function EditCallSetupTemplatePage({
   params: Promise<{ templateId: string }>;
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
   const { templateId } = await params;
   const sp = (await searchParams) ?? {};
   const returnTo = getFirstQueryValue(sp.returnTo) ?? null;
@@ -33,6 +39,7 @@ export default async function EditCallSetupTemplatePage({
     .from("call_setup_templates")
     .select("id,template_name,company_name,selected_questions,custom_questions,call_notes")
     .eq("id", templateId)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   if (error) {

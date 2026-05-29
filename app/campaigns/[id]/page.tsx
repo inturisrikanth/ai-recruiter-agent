@@ -2,9 +2,9 @@ import { CampaignDeleteAction } from "@/components/campaigns/CampaignDetailActio
 import { DuplicateCampaignAction } from "@/components/campaigns/DuplicateCampaignAction";
 import { CampaignWorkflow } from "@/components/campaigns/CampaignWorkflow";
 import { AppShell } from "@/components/dashboard/AppShell";
-import { supabase } from "@/lib/supabaseClient";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 // Ensure fresh data in production (avoid cached RSC/HTML).
 export const dynamic = "force-dynamic";
@@ -70,6 +70,12 @@ export default async function CampaignDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
   const { id } = await params;
 
   const { data, error } = await supabase
@@ -78,6 +84,7 @@ export default async function CampaignDetailPage({
       "id,campaign_name,job_title,job_description,required_skills,employment_type,status,candidate_count,created_at,updated_at",
     )
     .eq("id", id)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   if (error) {
@@ -132,11 +139,16 @@ export default async function CampaignDetailPage({
     .from("campaign_candidate_lists")
     .select("list_id,created_at")
     .eq("campaign_id", id)
+    .eq("user_id", user.id)
     .order("created_at", { ascending: true });
 
   const attachedListIds = (attachedLinks ?? []).map((r) => String(r.list_id));
   const { data: attachedLists, error: attachedListsError } = attachedListIds.length
-    ? await supabase.from("candidate_lists").select("id,list_name").in("id", attachedListIds)
+    ? await supabase
+        .from("candidate_lists")
+        .select("id,list_name")
+        .eq("user_id", user.id)
+        .in("id", attachedListIds)
     : { data: [], error: null };
 
   const nameById = new Map((attachedLists ?? []).map((r) => [String(r.id), String(r.list_name ?? "")]));
@@ -149,6 +161,7 @@ export default async function CampaignDetailPage({
     .from("call_configurations")
     .select("id")
     .eq("campaign_id", id)
+    .eq("user_id", user.id)
     .maybeSingle();
   const callsConfigured = !callConfigError && Boolean(callConfig?.id);
 
@@ -157,6 +170,7 @@ export default async function CampaignDetailPage({
     .from("campaign_call_sessions")
     .select("id,status,total_candidates,started_at,completed_at,created_at")
     .eq("campaign_id", id)
+    .eq("user_id", user.id)
     .in("status", activeSessionStatuses)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -167,6 +181,7 @@ export default async function CampaignDetailPage({
         .from("campaign_call_sessions")
         .select("id,status,total_candidates,started_at,completed_at,created_at")
         .eq("campaign_id", id)
+        .eq("user_id", user.id)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle()

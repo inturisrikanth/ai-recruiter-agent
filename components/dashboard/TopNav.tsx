@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
+import { useState } from "react";
 
 type TopNavItem = {
   label: string;
@@ -99,6 +100,8 @@ function IconFinances({ className }: { className?: string }) {
 
 export function TopNav() {
   const pathname = usePathname();
+  const router = useRouter();
+  const [logoutError, setLogoutError] = useState<string | null>(null);
 
   const items: TopNavItem[] = [
     { label: "Home", href: "/", match: (p) => p === "/", icon: IconHome },
@@ -233,13 +236,43 @@ export function TopNav() {
             </span>
           </button>
 
-          <button
-            type="button"
-            aria-label="Account"
-            className="grid size-11 place-items-center rounded-full bg-white shadow-sm ring-1 ring-zinc-200/70 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/30"
-          >
-            <span className="text-sm font-semibold text-zinc-900">SI</span>
-          </button>
+          <details className="relative">
+            <summary
+              aria-label="Account"
+              className="list-none [&::-webkit-details-marker]:hidden cursor-pointer"
+              onClick={() => setLogoutError(null)}
+            >
+              <span className="grid size-11 place-items-center rounded-full bg-white shadow-sm ring-1 ring-zinc-200/70 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/30">
+                <span className="text-sm font-semibold text-zinc-900">SI</span>
+              </span>
+            </summary>
+            <div className="absolute right-0 mt-2 w-56 overflow-hidden rounded-3xl bg-white shadow-xl ring-1 ring-zinc-200/70">
+              <div className="border-b border-zinc-200/70 px-4 py-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Account</div>
+              </div>
+              <div className="p-2">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between rounded-2xl px-3 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50"
+                  onClick={async () => {
+                    setLogoutError(null);
+                    const res = await fetch("/api/auth/logout", { method: "POST" });
+                    if (!res.ok) {
+                      const payload = (await res.json().catch(() => null)) as { error?: string } | null;
+                      setLogoutError(payload?.error || "Couldn’t log out.");
+                      return;
+                    }
+                    router.replace("/login");
+                    router.refresh();
+                  }}
+                >
+                  Log out
+                  <span className="text-xs font-medium text-zinc-400">→</span>
+                </button>
+                {logoutError ? <div className="mt-2 px-3 pb-2 text-xs font-semibold text-rose-700">{logoutError}</div> : null}
+              </div>
+            </div>
+          </details>
         </div>
       </div>
 

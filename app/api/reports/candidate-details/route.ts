@@ -1,7 +1,13 @@
-import { supabase } from "@/lib/supabaseClient";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
 export async function GET(request: Request) {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const url = new URL(request.url);
   const candidateId = String(url.searchParams.get("candidateId") ?? "");
   const campaignId = String(url.searchParams.get("campaignId") ?? "");
@@ -15,6 +21,7 @@ export async function GET(request: Request) {
       "id,campaign_id,call_session_id,candidate_name,candidate_phone,candidate_email,call_status,interest_status,attempt_count,max_attempts,retry_reason,last_error,next_retry_at,call_completed_at,updated_at,created_at,call_summary,candidate_answers,transcript",
     )
     .eq("id", candidateId)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

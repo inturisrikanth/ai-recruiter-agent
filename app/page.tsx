@@ -1,8 +1,9 @@
 import { AppShell } from "@/components/dashboard/AppShell";
 import { StatCard } from "@/components/dashboard/StatCard";
-import { supabase } from "@/lib/supabaseClient";
 import Link from "next/link";
 import { type ReactNode } from "react";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
 
 function formatCount(value: number | null | undefined, fallback = "—") {
   if (value == null || Number.isNaN(value)) return fallback;
@@ -35,16 +36,26 @@ function formatRelativeTime(iso: string | null | undefined) {
 }
 
 export default async function Home() {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
   const [
     { count: totalCampaignsCount },
     { count: totalCandidatesCount },
     { count: completedCallsCount },
     { count: totalOutreachAttemptsCount },
   ] = await Promise.all([
-    supabase.from("campaigns").select("id", { count: "exact", head: true }),
-    supabase.from("candidates").select("id", { count: "exact", head: true }),
-    supabase.from("campaign_call_candidates").select("id", { count: "exact", head: true }).in("call_status", ["completed", "done"]),
-    supabase.from("campaign_call_candidates").select("id", { count: "exact", head: true }),
+    supabase.from("campaigns").select("id", { count: "exact", head: true }).eq("user_id", user.id),
+    supabase.from("candidates").select("id", { count: "exact", head: true }).eq("user_id", user.id),
+    supabase
+      .from("campaign_call_candidates")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .in("call_status", ["completed", "done"]),
+    supabase.from("campaign_call_candidates").select("id", { count: "exact", head: true }).eq("user_id", user.id),
   ]);
 
   const stats = [
@@ -82,15 +93,20 @@ export default async function Home() {
     { count: completedOutreachCount },
     { data: completedSessions },
   ] = await Promise.all([
-    supabase.from("campaigns").select("id", { count: "exact", head: true }).eq("status", "Draft"),
-    supabase.from("campaigns").select("id", { count: "exact", head: true }).eq("status", "Ready"),
-    supabase.from("campaigns").select("id", { count: "exact", head: true }).eq("status", "Completed"),
+    supabase.from("campaigns").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "Draft"),
+    supabase.from("campaigns").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "Ready"),
+    supabase
+      .from("campaigns")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .eq("status", "Completed"),
     supabase
       .from("campaign_call_sessions")
       .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
       .in("status", ["paused_manual", "paused_calling_window"]),
-    supabase.from("campaign_call_sessions").select("id", { count: "exact", head: true }).eq("status", "completed"),
-    supabase.from("campaign_call_sessions").select("campaign_id").eq("status", "completed").limit(50000),
+    supabase.from("campaign_call_sessions").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "completed"),
+    supabase.from("campaign_call_sessions").select("campaign_id").eq("user_id", user.id).eq("status", "completed").limit(50000),
   ]);
 
   const reportsAvailableCount = new Set(
@@ -152,21 +168,29 @@ export default async function Home() {
     { data: recentTerminalCalls },
     { data: recentScheduledCalls },
   ] = await Promise.all([
-    supabase.from("campaigns").select("id,campaign_name,created_at").order("created_at", { ascending: false }).limit(8),
+    supabase
+      .from("campaigns")
+      .select("id,campaign_name,created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(8),
     supabase
       .from("campaign_call_sessions")
       .select("id,campaign_id,status,started_at,completed_at,updated_at,created_at")
+      .eq("user_id", user.id)
       .order("updated_at", { ascending: false })
       .limit(12),
     supabase
       .from("campaign_call_candidates")
       .select("id,campaign_id,candidate_name,call_status,call_completed_at,updated_at,created_at")
+      .eq("user_id", user.id)
       .in("call_status", ["completed", "failed", "no_answer"])
       .order("call_completed_at", { ascending: false })
       .limit(12),
     supabase
       .from("campaign_call_candidates")
       .select("id,campaign_id,candidate_name,call_status,call_completed_at,updated_at,created_at")
+      .eq("user_id", user.id)
       .in("call_status", ["retry_scheduled", "callback_scheduled"])
       .order("updated_at", { ascending: false })
       .limit(12),
@@ -183,6 +207,7 @@ export default async function Home() {
     ? await supabase
         .from("campaigns")
         .select("id,campaign_name")
+        .eq("user_id", user.id)
         .in("id", Array.from(activityCampaignIds))
         .limit(5000)
     : { data: [] as Array<{ id: unknown; campaign_name: unknown }> };

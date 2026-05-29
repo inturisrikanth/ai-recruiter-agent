@@ -1,6 +1,6 @@
 "use client";
 
-import { supabase } from "@/lib/supabaseClient";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -22,6 +22,7 @@ export function CampaignActivateButton({
   disabled: boolean;
   disabledReason?: string | null;
 }) {
+  const supabase = getSupabaseBrowserClient();
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,10 +32,21 @@ export function CampaignActivateButton({
     setIsSaving(true);
     setError(null);
 
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+    if (userError || !user) {
+      setError(userError?.message ?? "You must be signed in to activate campaigns.");
+      setIsSaving(false);
+      return;
+    }
+
     const { error } = await supabase
       .from("campaigns")
       .update({ status: "Ready", updated_at: new Date().toISOString() })
-      .eq("id", campaignId);
+      .eq("id", campaignId)
+      .eq("user_id", user.id);
 
     if (error) {
       setError(error.message);

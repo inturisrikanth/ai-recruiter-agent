@@ -1,7 +1,7 @@
 import { AppShell } from "@/components/dashboard/AppShell";
-import { supabase } from "@/lib/supabaseClient";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 // Ensure fresh data in production (avoid cached RSC/HTML).
 export const dynamic = "force-dynamic";
@@ -30,12 +30,19 @@ export default async function CandidateListDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
   const { id } = await params;
 
   const { data: list, error: listError } = await supabase
     .from("candidate_lists")
     .select("id,list_name,source_file_name,total_candidates,created_at")
     .eq("id", id)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   if (listError) {
@@ -76,6 +83,7 @@ export default async function CandidateListDetailPage({
     .from("candidates")
     .select("id,name,phone,email")
     .eq("list_id", id)
+    .eq("user_id", user.id)
     .order("name", { ascending: true });
 
   const candidates: CandidateRow[] = (candidatesData ?? []).map((c) => ({

@@ -1,6 +1,6 @@
 "use client";
 
-import { supabase } from "@/lib/supabaseClient";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -63,6 +63,7 @@ export function CampaignCallSetupTemplatesSelector({
   templates: CallSetupTemplateRow[];
   initialAttachedTemplateId?: string | null;
 }) {
+  const supabase = getSupabaseBrowserClient();
   const router = useRouter();
 
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>(() => {
@@ -104,12 +105,19 @@ export function CampaignCallSetupTemplatesSelector({
 
     setIsAttaching(true);
     try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+      if (userError || !user) throw new Error(userError?.message ?? "You must be signed in to attach templates.");
+
       const now = new Date().toISOString();
       const { error } = await supabase
         .from("call_configurations")
         .upsert(
           {
             campaign_id: campaignId,
+            user_id: user.id,
             company_name: safeCompany,
             selected_questions: selectedQuestions,
             custom_questions: customQuestions,
@@ -124,6 +132,7 @@ export function CampaignCallSetupTemplatesSelector({
       const linkRow = {
         campaign_id: campaignId,
         call_setup_template_id: selectedTemplate.id,
+        user_id: user.id,
         updated_at: now,
       };
 
@@ -133,7 +142,7 @@ export function CampaignCallSetupTemplatesSelector({
 
       if (linkErr) {
         // If the unique constraint isn't present yet, fall back to delete+insert.
-        await supabase.from("campaign_call_setup_templates").delete().eq("campaign_id", campaignId);
+        await supabase.from("campaign_call_setup_templates").delete().eq("campaign_id", campaignId).eq("user_id", user.id);
         const { error: insertErr } = await supabase.from("campaign_call_setup_templates").insert(linkRow);
         if (insertErr) throw insertErr;
       }

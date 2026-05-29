@@ -1,6 +1,6 @@
 "use client";
 
-import { supabase } from "@/lib/supabaseClient";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   DEFAULT_SCREENING_QUESTIONS,
   Field,
@@ -28,6 +28,7 @@ export function CallConfigurationForm({
   campaignId: string;
   initial: CallConfigurationDraft | null;
 }) {
+  const supabase = getSupabaseBrowserClient();
   const router = useRouter();
 
   const initialSelected = useMemo(() => new Set(normalizeStringArray(initial?.selectedQuestions)), [initial]);
@@ -82,11 +83,22 @@ export function CallConfigurationForm({
     const selectedQuestions = Array.from(selected).map((q) => q.trim()).filter(Boolean);
     const custom = customQuestions.map((q) => q.trim()).filter(Boolean);
 
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+    if (userError || !user) {
+      setError(userError?.message ?? "You must be signed in to save call configuration.");
+      setIsSaving(false);
+      return;
+    }
+
     const { error } = await supabase
       .from("call_configurations")
       .upsert(
         {
           campaign_id: campaignId,
+          user_id: user.id,
           company_name: safeCompany,
           selected_questions: selectedQuestions,
           custom_questions: custom,
