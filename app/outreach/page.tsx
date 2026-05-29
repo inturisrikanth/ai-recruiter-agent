@@ -1,6 +1,8 @@
 import { AppShell } from "@/components/dashboard/AppShell";
 import { OutreachControls } from "@/components/outreach/OutreachControls";
+import { ContinueAnywayButton } from "@/components/outreach/ContinueAnywayButton";
 import { RetryNowButton } from "@/components/outreach/RetryNowButton";
+import { getCallingWindowState } from "@/lib/callingWindow";
 import { supabase } from "@/lib/supabaseClient";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -25,6 +27,8 @@ function normalizeCampaignStatus(value: string): CampaignStatus {
 function callSessionLabel(status: CallSessionStatus) {
   const s = String(status ?? "").trim();
   if (!s) return "—";
+  if (s.toLowerCase() === "paused_calling_window") return "Paused (Outside Calling Hours)";
+  if (s.toLowerCase() === "paused_manual") return "Paused Manually";
   return s.slice(0, 1).toUpperCase() + s.slice(1);
 }
 
@@ -33,7 +37,7 @@ function pillClass(status: string) {
   if (s === "completed") return "bg-emerald-50 text-emerald-700 ring-emerald-200/70";
   if (s === "running" || s === "calling") return "bg-indigo-50 text-indigo-800 ring-indigo-200/70";
   if (s === "queued") return "bg-sky-50 text-sky-800 ring-sky-200/70";
-  if (s === "paused") return "bg-amber-50 text-amber-800 ring-amber-200/70";
+  if (s === "paused" || s.startsWith("paused_")) return "bg-amber-50 text-amber-800 ring-amber-200/70";
   if (s === "stopped") return "bg-zinc-100 text-zinc-700 ring-zinc-200/80";
   if (s === "failed" || s === "no_answer" || s === "no-answer" || s === "no answer") {
     return "bg-rose-50 text-rose-800 ring-rose-200/70";
@@ -442,7 +446,26 @@ export default async function OutreachPage({
   const sessionStatus = String(callSession?.status ?? "");
   const totalCandidates = Number(callSession?.total_candidates ?? 0);
   const isStopped = sessionStatus.toLowerCase() === "stopped";
-  const isPaused = sessionStatus.toLowerCase() === "paused";
+  const isPaused = sessionStatus.toLowerCase().startsWith("paused");
+  const callingWindow = getCallingWindowState();
+  const sessionStatusLower = sessionStatus.toLowerCase();
+  const outreachActiveNow =
+    Boolean(sessionId) &&
+    !isStopped &&
+    (sessionStatusLower === "running" || sessionStatusLower === "queued" || sessionStatusLower === "calling" || sessionStatusLower === "in_progress");
+  const pausedByCallingWindow = Boolean(sessionId) && sessionStatusLower === "paused_calling_window" && !outreachActiveNow;
+  const callingWindowEffectiveStatus: "active" | "paused_quiet_hours" | "paused_manual" | "override" | "inactive" =
+    isStopped
+      ? "inactive"
+      : callingWindow.withinWindow
+        ? "active"
+        : outreachActiveNow
+          ? "override"
+          : pausedByCallingWindow
+            ? "paused_quiet_hours"
+            : isPaused
+              ? "paused_manual"
+              : "paused_quiet_hours";
 
   const { data: candidateRows, error: candidateLoadError } = sessionId
     ? await supabase
@@ -532,6 +555,53 @@ export default async function OutreachPage({
                   <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Total candidates</div>
                   <div className="mt-2 text-sm font-semibold text-zinc-900">{totalCandidates.toLocaleString()}</div>
                 </div>
+                <div className="min-w-[220px] rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Calling window</div>
+                    <span
+                      className={[
+                        "rounded-full px-2 py-1 text-xs font-medium ring-1",
+                        callingWindowEffectiveStatus === "active"
+                          ? "bg-emerald-50 text-emerald-700 ring-emerald-200/70"
+                          : callingWindowEffectiveStatus === "override"
+                            ? "bg-indigo-50 text-indigo-800 ring-indigo-200/70"
+                            : callingWindowEffectiveStatus === "inactive"
+                              ? "bg-zinc-100 text-zinc-700 ring-zinc-200/80"
+                              : "bg-amber-50 text-amber-800 ring-amber-200/70",
+                      ].join(" ")}
+                    >
+                      {callingWindowEffectiveStatus === "active"
+                        ? "Active"
+                        : callingWindowEffectiveStatus === "override"
+                          ? "Override active"
+                          : callingWindowEffectiveStatus === "inactive"
+                            ? "Inactive"
+                            : "Paused"}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-sm font-semibold text-zinc-900">{callingWindow.windowLabel}</div>
+                  <div className="mt-1 text-xs text-zinc-600">Current time: {callingWindow.nowCstLabel}</div>
+                  <div className="mt-3 text-sm text-zinc-700">
+                    {callingWindowEffectiveStatus === "active"
+                      ? "Calls are currently allowed."
+                      : callingWindowEffectiveStatus === "override"
+                        ? "Calls are currently running outside the calling window due to an override."
+                        : callingWindowEffectiveStatus === "inactive"
+                          ? "Outreach is currently stopped."
+                          : callingWindowEffectiveStatus === "paused_manual"
+                            ? "Outreach is currently paused."
+                            : null}
+                  </div>
+                  {callingWindowEffectiveStatus === "paused_quiet_hours" ? (
+                    <div className="mt-3 space-y-2">
+                      <div className="text-xs text-zinc-600">
+                        Calls are paused because it is outside the allowed calling window. You can continue now, or resume outreach during the next calling
+                        window.
+                      </div>
+                      {(!sessionId || pausedByCallingWindow) && !isStopped ? <ContinueAnywayButton campaignId={campaign.id} /> : null}
+                    </div>
+                  ) : null}
+                </div>
               </div>
 
               {!isStopped ? (
@@ -541,6 +611,7 @@ export default async function OutreachPage({
                     hasSession={Boolean(sessionId)}
                     sessionStatus={sessionStatus || null}
                     compact
+                    hidePauseResume={pausedByCallingWindow}
                   />
                 </div>
               ) : null}

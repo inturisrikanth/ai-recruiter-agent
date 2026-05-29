@@ -47,7 +47,7 @@ export async function POST() {
 
     const { data: sessionRow } = await supabase.from("campaign_call_sessions").select("status").eq("id", sessionId).maybeSingle();
     const status = String(sessionRow?.status ?? "").toLowerCase();
-    if (status === "paused" || status === "stopped" || status === "completed") continue;
+    if (status.startsWith("paused") || status === "stopped" || status === "completed") continue;
 
     const result = await startCallForCandidateRow({ campaignId, sessionId, candidateRowId });
     return NextResponse.json({ ok: true, processed: true, result }, { status: result.started ? 200 : 202 });

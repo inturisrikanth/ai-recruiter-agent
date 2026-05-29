@@ -80,7 +80,7 @@ export async function startCallForCandidateRow(opts: {
   if (!sessionRow?.id) return { started: false, reason: "no_active_session" };
 
   const sessionStatus = String(sessionRow.status ?? "").toLowerCase();
-  if (sessionStatus === "paused" || sessionStatus === "stopped" || sessionStatus === "completed") {
+  if (sessionStatus.startsWith("paused") || sessionStatus === "stopped" || sessionStatus === "completed") {
     return { started: false, reason: "paused_or_stopped" };
   }
 
@@ -259,7 +259,7 @@ export async function startNextQueuedCall(opts: { campaignId: string; sessionId:
   if (!sessionRow?.id) return { started: false, reason: "no_active_session" };
 
   const sessionStatus = String(sessionRow.status ?? "").toLowerCase();
-  if (sessionStatus === "paused" || sessionStatus === "stopped" || sessionStatus === "completed") {
+  if (sessionStatus.startsWith("paused") || sessionStatus === "stopped" || sessionStatus === "completed") {
     return { started: false, reason: "paused_or_stopped" };
   }
 

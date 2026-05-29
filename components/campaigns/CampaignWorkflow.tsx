@@ -79,7 +79,7 @@ export function CampaignWorkflow(props: {
   const outreachActive = status === "Calling" || status === "Paused" || status === "Completed";
   const canViewOutreach = outreachActive || hasCallSession;
   const sessionLower = String(callSessionStatus ?? "").toLowerCase();
-  const sessionPaused = sessionLower === "paused";
+  const sessionPaused = sessionLower.startsWith("paused");
   const sessionStopped = sessionLower === "stopped";
   const sessionCompleted = sessionLower === "completed";
 

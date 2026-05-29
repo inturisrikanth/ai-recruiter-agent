@@ -91,11 +91,13 @@ export function OutreachControls({
   hasSession,
   sessionStatus,
   compact = false,
+  hidePauseResume = false,
 }: {
   campaignId: string;
   hasSession: boolean;
   sessionStatus: string | null;
   compact?: boolean;
+  hidePauseResume?: boolean;
 }) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
@@ -103,7 +105,7 @@ export function OutreachControls({
   const [confirmStopOpen, setConfirmStopOpen] = useState(false);
 
   const statusLower = (sessionStatus ?? "").toLowerCase();
-  const isPaused = statusLower === "paused";
+  const isPaused = statusLower.startsWith("paused");
   const isStopped = statusLower === "stopped";
   const isCompleted = statusLower === "completed";
 
@@ -155,14 +157,16 @@ export function OutreachControls({
       <div className="flex flex-wrap gap-2">
         {!isStopped ? (
           <>
-            <button
-              type="button"
-              className={(isPaused ? softResumeButtonClass : softPauseButtonClass)(!canPauseOrResume || isSaving)}
-              disabled={!canPauseOrResume || isSaving}
-              onClick={() => sendAction(isPaused ? "resume" : "pause")}
-            >
-              {isSaving ? "Saving…" : pauseLabel}
-            </button>
+            {!hidePauseResume ? (
+              <button
+                type="button"
+                className={(isPaused ? softResumeButtonClass : softPauseButtonClass)(!canPauseOrResume || isSaving)}
+                disabled={!canPauseOrResume || isSaving}
+                onClick={() => sendAction(isPaused ? "resume" : "pause")}
+              >
+                {isSaving ? "Saving…" : pauseLabel}
+              </button>
+            ) : null}
             <button
               type="button"
               className={dangerButtonClass(!canStop || isSaving)}

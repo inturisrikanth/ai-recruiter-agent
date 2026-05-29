@@ -1,8 +1,10 @@
 import { supabase } from "@/lib/supabaseClient";
 import { startNextQueuedCall } from "@/lib/outreach/startNextQueuedCall";
+import { getCallingWindowState } from "@/lib/callingWindow";
 import { NextResponse } from "next/server";
 
 type CallSessionStatus = "queued" | "running" | "completed" | "failed" | string;
+const PAUSED_CALLING_WINDOW = "paused_calling_window";
 
 function chunk<T>(arr: T[], size: number) {
   const out: T[][] = [];
@@ -17,6 +19,17 @@ function nowIso() {
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: campaignId } = await params;
 
+  let payload: unknown = null;
+  try {
+    payload = await _request.json();
+  } catch {
+    payload = null;
+  }
+  const overrideCallingWindow =
+    payload && typeof payload === "object" && "overrideCallingWindow" in payload
+      ? Boolean((payload as { overrideCallingWindow?: unknown }).overrideCallingWindow)
+      : false;
+
   const { data: campaign, error: campaignError } = await supabase
     .from("campaigns")
     .select("id,status")
@@ -29,11 +42,13 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   if (!campaign?.id) {
     return NextResponse.json({ error: "Campaign not found." }, { status: 404 });
   }
-  if (String(campaign.status ?? "") !== "Ready") {
+  const campaignStatus = String(campaign.status ?? "");
+  const canStartFromStatus = campaignStatus === "Ready" || campaignStatus === "Paused" || campaignStatus === "Calling";
+  if (!canStartFromStatus) {
     return NextResponse.json({ error: "Campaign must be Ready before starting calls." }, { status: 409 });
   }
 
-  const activeStatuses: CallSessionStatus[] = ["queued", "running"];
+  const activeStatuses: CallSessionStatus[] = ["queued", "running", "paused"];
   const { data: existingSession, error: existingError } = await supabase
     .from("campaign_call_sessions")
     .select("id,status,total_candidates,started_at,created_at")
@@ -47,17 +62,50 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ error: existingError.message }, { status: 500 });
   }
 
+  const windowState = getCallingWindowState();
+  const outsideCallingWindow = !windowState.withinWindow;
+
   if (existingSession?.id) {
     const now = nowIso();
+    const sessionId = String(existingSession.id);
+
+    if (outsideCallingWindow && !overrideCallingWindow) {
+      const { error: sessionUpdateError } = await supabase
+        .from("campaign_call_sessions")
+        .update({ status: PAUSED_CALLING_WINDOW, updated_at: now })
+        .eq("id", sessionId);
+      if (sessionUpdateError) return NextResponse.json({ error: sessionUpdateError.message }, { status: 500 });
+
+      const { error: updateCampaignError } = await supabase
+        .from("campaigns")
+        .update({ status: "Paused", updated_at: now })
+        .eq("id", campaignId);
+      if (updateCampaignError) return NextResponse.json({ error: updateCampaignError.message }, { status: 500 });
+
+      return NextResponse.json(
+        {
+          sessionId,
+          created: false,
+          pausedByCallingWindow: true,
+          window: windowState,
+        },
+        { status: 202 },
+      );
+    }
+
+    // Ensure session is ready to run before starting the next queued call.
+    const { error: sessionUpdateError } = await supabase
+      .from("campaign_call_sessions")
+      .update({ status: "queued", updated_at: now })
+      .eq("id", sessionId);
+    if (sessionUpdateError) return NextResponse.json({ error: sessionUpdateError.message }, { status: 500 });
+
     const { error: updateCampaignError } = await supabase
       .from("campaigns")
       .update({ status: "Calling", updated_at: now })
       .eq("id", campaignId);
-    if (updateCampaignError) {
-      return NextResponse.json({ error: updateCampaignError.message }, { status: 500 });
-    }
+    if (updateCampaignError) return NextResponse.json({ error: updateCampaignError.message }, { status: 500 });
 
-    const sessionId = String(existingSession.id);
     const callStart = await startNextQueuedCall({ campaignId, sessionId });
     return NextResponse.json(
       {
@@ -109,7 +157,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     .from("campaign_call_sessions")
     .insert({
       campaign_id: campaignId,
-      status: "queued",
+      status: outsideCallingWindow && !overrideCallingWindow ? PAUSED_CALLING_WINDOW : "queued",
       total_candidates: candidates.length,
       started_at: now,
     })
@@ -140,11 +188,23 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
 
   const { error: updateCampaignError } = await supabase
     .from("campaigns")
-    .update({ status: "Calling", updated_at: now })
+    .update({ status: outsideCallingWindow && !overrideCallingWindow ? "Paused" : "Calling", updated_at: now })
     .eq("id", campaignId);
 
   if (updateCampaignError) {
     return NextResponse.json({ error: updateCampaignError.message }, { status: 500 });
+  }
+
+  if (outsideCallingWindow && !overrideCallingWindow) {
+    return NextResponse.json(
+      {
+        sessionId: callSessionId,
+        created: true,
+        pausedByCallingWindow: true,
+        window: windowState,
+      },
+      { status: 202 },
+    );
   }
 
   const callStart = await startNextQueuedCall({ campaignId, sessionId: callSessionId });

@@ -1,7 +1,10 @@
 import { supabase } from "@/lib/supabaseClient";
+import { getCallingWindowState } from "@/lib/callingWindow";
 import { NextResponse } from "next/server";
 
 type Action = "pause" | "resume" | "stop";
+const PAUSED_CALLING_WINDOW = "paused_calling_window";
+const PAUSED_MANUAL = "paused_manual";
 
 function isAction(value: unknown): value is Action {
   return value === "pause" || value === "resume" || value === "stop";
@@ -32,7 +35,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (!campaign?.id) return NextResponse.json({ error: "Campaign not found." }, { status: 404 });
 
   // Prefer an active session if present, otherwise fall back to the latest session.
-  const activeStatuses = ["queued", "running", "paused"];
+  const activeStatuses = ["queued", "running", "paused", PAUSED_CALLING_WINDOW, PAUSED_MANUAL];
   const { data: activeSession, error: activeError } = await supabase
     .from("campaign_call_sessions")
     .select("id,status,created_at")
@@ -66,7 +69,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (action === "pause") {
     const { error: sessionUpdateError } = await supabase
       .from("campaign_call_sessions")
-      .update({ status: "paused", updated_at: now })
+      .update({ status: PAUSED_MANUAL, updated_at: now })
       .eq("id", String(session.id));
     if (sessionUpdateError) return NextResponse.json({ error: sessionUpdateError.message }, { status: 500 });
 
@@ -81,6 +84,23 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   if (action === "resume") {
+    const windowState = getCallingWindowState();
+    if (!windowState.withinWindow) {
+      const { error: sessionUpdateError } = await supabase
+        .from("campaign_call_sessions")
+        .update({ status: PAUSED_CALLING_WINDOW, updated_at: now })
+        .eq("id", String(session.id));
+      if (sessionUpdateError) return NextResponse.json({ error: sessionUpdateError.message }, { status: 500 });
+
+      const { error: campaignUpdateError } = await supabase
+        .from("campaigns")
+        .update({ status: "Paused", updated_at: now })
+        .eq("id", campaignId);
+      if (campaignUpdateError) return NextResponse.json({ error: campaignUpdateError.message }, { status: 500 });
+
+      return NextResponse.json({ ok: true, pausedByCallingWindow: true, window: windowState }, { status: 202 });
+    }
+
     const { error: sessionUpdateError } = await supabase
       .from("campaign_call_sessions")
       .update({ status: "queued", updated_at: now })

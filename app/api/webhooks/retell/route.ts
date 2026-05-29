@@ -260,7 +260,7 @@ async function updateSessionRollup(sessionId: string, campaignId: string) {
   if (sessionError) return;
 
   const currentStatus = String(sessionRow?.status ?? "").toLowerCase();
-  if (currentStatus === "paused" || currentStatus === "stopped") return;
+  if (currentStatus.startsWith("paused") || currentStatus === "stopped") return;
 
   const [{ count: queuedCount, error: queuedErr }, { count: callingCount, error: callingErr }] = await Promise.all([
     supabase
@@ -302,7 +302,7 @@ async function updateSessionRollup(sessionId: string, campaignId: string) {
 async function tryAutoAdvance(opts: { campaignId: string; sessionId: string; sessionStatus: string }) {
   const { campaignId, sessionId, sessionStatus } = opts;
   const status = sessionStatus.toLowerCase();
-  if (status === "paused" || status === "stopped" || status === "completed") return;
+  if (status.startsWith("paused") || status === "stopped" || status === "completed") return;
 
   // Retry briefly in case the just-finished call row is still visible as "calling" in a concurrent read.
   const waits = [0, 350, 900];
