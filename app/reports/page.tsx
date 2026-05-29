@@ -1,5 +1,6 @@
 import { AppShell } from "@/components/dashboard/AppShell";
 import { CampaignReportCandidatesTable } from "@/components/reports/CampaignReportCandidatesTable";
+import { DownloadCampaignReportButton } from "@/components/reports/DownloadCampaignReportButton";
 import { supabase } from "@/lib/supabaseClient";
 import Link from "next/link";
 
@@ -616,8 +617,8 @@ export default async function ReportsPage({
   return (
     <AppShell>
       <header className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-zinc-200/70 sm:p-7">
-        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
-          <div className="min-w-0">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-600">
               <Link href="/reports" className="font-medium text-zinc-700 hover:text-zinc-900">
                 Reports
@@ -630,50 +631,58 @@ export default async function ReportsPage({
             <p className="mt-1 text-sm text-zinc-600">Completed outreach results for this campaign.</p>
           </div>
 
-          <div className="flex flex-wrap justify-start gap-2 sm:justify-end">
+          <div className="flex flex-wrap items-center justify-start gap-2 sm:justify-end">
             <Link
               href="/reports"
-              className="inline-flex h-11 items-center justify-center rounded-full bg-white px-5 text-sm font-semibold text-zinc-900 shadow-sm ring-1 ring-zinc-200/70 hover:bg-zinc-50"
+              className="inline-flex h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-white px-5 text-sm font-semibold text-zinc-900 shadow-sm ring-1 ring-zinc-200/70 transition hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-500/15"
             >
               Back to all reports
             </Link>
             <Link
               href={`/campaigns/${encodeURIComponent(campaignId)}`}
-              className="inline-flex h-11 items-center justify-center rounded-full bg-white px-5 text-sm font-semibold text-zinc-900 shadow-sm ring-1 ring-zinc-200/70 hover:bg-zinc-50"
+              className="inline-flex h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-white px-5 text-sm font-semibold text-indigo-700 shadow-sm ring-1 ring-indigo-200/70 transition hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/15"
             >
               Open this campaign
             </Link>
             <Link
               href={`/outreach?campaignId=${encodeURIComponent(campaignId)}`}
-              className="inline-flex h-11 items-center justify-center rounded-full bg-indigo-600 px-5 text-sm font-semibold text-white shadow-sm ring-1 ring-indigo-500/20 hover:bg-indigo-500"
+              className="inline-flex h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-violet-600 px-5 text-sm font-semibold text-white shadow-sm ring-1 ring-violet-500/20 transition hover:bg-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
             >
               Open this campaign outreach
             </Link>
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <div className="rounded-3xl bg-zinc-50 p-3 ring-1 ring-zinc-200/70">
-            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Campaign</div>
-            <div className="mt-1 text-sm font-semibold text-zinc-900">{String(campaign.campaign_name ?? "Campaign")}</div>
-          </div>
-          <div className="rounded-3xl bg-zinc-50 p-3 ring-1 ring-zinc-200/70">
-            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Job title</div>
-            <div className="mt-1 text-sm font-semibold text-zinc-900">{String(campaign.job_title ?? "—")}</div>
-          </div>
-          <div className="rounded-3xl bg-zinc-50 p-3 ring-1 ring-zinc-200/70">
-            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Campaign status</div>
-            <div className="mt-1">
-              <span
-                className={[
-                  "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1",
-                  pillClass(campaignStatus),
-                ].join(" ")}
-              >
-                {campaignStatus}
-              </span>
+        <div className="mt-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between md:gap-4">
+          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 md:flex-1 md:max-w-3xl">
+            <div className="min-w-0 rounded-3xl bg-zinc-50 p-3 ring-1 ring-zinc-200/70">
+              <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Campaign</div>
+              <div className="mt-1 text-sm font-semibold leading-snug text-zinc-900 break-words">
+                {String(campaign.campaign_name ?? "Campaign")}
+              </div>
             </div>
-            {completedAt ? <div className="mt-2 text-xs text-zinc-600">Last updated {formatDateTime(completedAt)}</div> : null}
+            <div className="min-w-0 rounded-3xl bg-zinc-50 p-3 ring-1 ring-zinc-200/70">
+              <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Job title</div>
+              <div className="mt-1 text-sm font-semibold leading-snug text-zinc-900 break-words">{String(campaign.job_title ?? "—")}</div>
+            </div>
+            <div className="min-w-0 rounded-3xl bg-zinc-50 p-3 ring-1 ring-zinc-200/70">
+              <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Campaign status</div>
+              <div className="mt-1">
+                <span
+                  className={[
+                    "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1",
+                    pillClass(campaignStatus),
+                  ].join(" ")}
+                >
+                  {campaignStatus}
+                </span>
+              </div>
+              {completedAt ? <div className="mt-2 text-xs text-zinc-600">Last updated {formatDateTime(completedAt)}</div> : null}
+            </div>
+          </div>
+
+          <div className="md:shrink-0">
+            <DownloadCampaignReportButton campaignId={campaignId} />
           </div>
         </div>
       </header>

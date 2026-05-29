@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Tailwind v4 content sources (stabilize dev builds with Turbopack).
+   Without explicit sources, the dev CSS bundle can miss utilities on refresh/navigation. */
+@source "./**/*.{js,jsx,ts,tsx,mdx}";
+@source "../components/**/*.{js,jsx,ts,tsx,mdx}";
+@source "../lib/**/*.{js,jsx,ts,tsx,mdx}";
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
