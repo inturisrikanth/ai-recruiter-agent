@@ -51,6 +51,7 @@ type CompactStatCardProps = {
   delta: string;
   badgeLabel?: string;
   accent?: "indigo" | "emerald" | "sky" | "amber" | "rose" | "zinc";
+  variant?: "grid" | "sidebar" | "metricsRow";
 };
 
 function badgeClasses(accent: NonNullable<CompactStatCardProps["accent"]>) {
@@ -77,17 +78,52 @@ function CompactStatCard({
   delta,
   badgeLabel = "Live",
   accent = "indigo",
+  variant = "grid",
 }: CompactStatCardProps) {
+  const isGrid = variant === "grid";
+  const isSidebar = variant === "sidebar";
+  const isMetricsRow = variant === "metricsRow";
+
+  const containerClass = isGrid
+    ? "rounded-3xl bg-white p-4 shadow-sm ring-1 ring-zinc-200/70"
+    : isMetricsRow
+      ? "rounded-2xl bg-zinc-50 px-3 py-2 ring-1 ring-zinc-200/70"
+      : "rounded-2xl bg-zinc-50 px-3 py-2.5 ring-1 ring-zinc-200/70";
+
+  const labelClass = isGrid
+    ? "text-sm font-medium text-zinc-500"
+    : isMetricsRow
+      ? "text-[11px] font-semibold uppercase tracking-wide text-zinc-500"
+      : "text-xs font-medium text-zinc-600";
+
+  const valueClass = isGrid
+    ? "mt-2 text-2xl font-semibold tracking-tight text-zinc-900"
+    : isMetricsRow
+      ? "mt-1 text-base font-semibold tracking-tight text-zinc-900"
+      : "mt-1 text-lg font-semibold tracking-tight text-zinc-900";
+
+  const deltaClass = isGrid
+    ? "mt-1 text-sm text-zinc-600"
+    : isMetricsRow
+      ? "mt-0.5 text-[11px] leading-tight text-zinc-600"
+      : "mt-0.5 text-xs text-zinc-600";
+
+  const badgeClass = isGrid
+    ? "rounded-full px-2 py-1 text-xs font-medium ring-1"
+    : isMetricsRow
+      ? "rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1"
+      : "rounded-full px-2 py-1 text-xs font-medium ring-1";
+
   return (
-    <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-zinc-200/70">
-      <div className="flex items-start justify-between gap-3">
-        <div className="text-sm font-medium text-zinc-500">{label}</div>
-        <span className={["rounded-full px-2 py-1 text-xs font-medium ring-1", badgeClasses(accent)].join(" ")}>
+    <div className={containerClass}>
+      <div className={["flex items-start justify-between", isSidebar || isMetricsRow ? "gap-2" : "gap-3"].join(" ")}>
+        <div className={labelClass}>{label}</div>
+        <span className={[badgeClass, badgeClasses(accent)].join(" ")}>
           {badgeLabel}
         </span>
       </div>
-      <div className="mt-2 text-2xl font-semibold tracking-tight text-zinc-900">{value}</div>
-      <div className="mt-1 text-sm text-zinc-600">{delta}</div>
+      <div className={valueClass}>{value}</div>
+      <div className={deltaClass}>{delta}</div>
     </div>
   );
 }
@@ -519,7 +555,7 @@ export default async function OutreachPage({
             <p className="mt-1 text-sm text-zinc-600">Live and queued call operations for this campaign.</p>
           </div>
 
-          <div className="flex justify-start sm:justify-end">
+          <div className="flex flex-col items-end gap-6">
             <Link
               href={`/campaigns/${encodeURIComponent(campaign.id)}`}
               className={[
@@ -529,125 +565,164 @@ export default async function OutreachPage({
             >
               Back to campaign
             </Link>
-          </div>
 
-          <div className="sm:col-span-2">
-            <div className="mt-3 flex w-full flex-wrap items-start gap-3 sm:flex-nowrap sm:items-center">
-              <div className="flex flex-wrap gap-2 sm:flex-nowrap">
-                <div className="min-w-[180px] rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Outreach status</div>
-                  <div className="mt-2">
-                    {sessionId ? (
-                      <span
-                        className={[
-                          "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1",
-                          pillClass(sessionStatus || "zinc"),
-                        ].join(" ")}
-                      >
-                        {callSessionLabel(sessionStatus)}
-                      </span>
-                    ) : (
-                      <span className="text-sm font-semibold text-zinc-900">No call session yet</span>
-                    )}
-                  </div>
-                </div>
-                <div className="min-w-[180px] rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Total candidates</div>
-                  <div className="mt-2 text-sm font-semibold text-zinc-900">{totalCandidates.toLocaleString()}</div>
-                </div>
-                <div className="min-w-[220px] rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Calling window</div>
-                    <span
-                      className={[
-                        "rounded-full px-2 py-1 text-xs font-medium ring-1",
-                        callingWindowEffectiveStatus === "active"
-                          ? "bg-emerald-50 text-emerald-700 ring-emerald-200/70"
-                          : callingWindowEffectiveStatus === "override"
-                            ? "bg-indigo-50 text-indigo-800 ring-indigo-200/70"
-                            : callingWindowEffectiveStatus === "inactive"
-                              ? "bg-zinc-100 text-zinc-700 ring-zinc-200/80"
-                              : "bg-amber-50 text-amber-800 ring-amber-200/70",
-                      ].join(" ")}
-                    >
-                      {callingWindowEffectiveStatus === "active"
-                        ? "Active"
-                        : callingWindowEffectiveStatus === "override"
-                          ? "Override active"
-                          : callingWindowEffectiveStatus === "inactive"
-                            ? "Inactive"
-                            : "Paused"}
-                    </span>
-                  </div>
-                  <div className="mt-2 text-sm font-semibold text-zinc-900">{callingWindow.windowLabel}</div>
-                  <div className="mt-1 text-xs text-zinc-600">Current time: {callingWindow.nowCstLabel}</div>
-                  <div className="mt-3 text-sm text-zinc-700">
-                    {callingWindowEffectiveStatus === "active"
-                      ? "Calls are currently allowed."
-                      : callingWindowEffectiveStatus === "override"
-                        ? "Calls are currently running outside the calling window due to an override."
-                        : callingWindowEffectiveStatus === "inactive"
-                          ? "Outreach is currently stopped."
-                          : callingWindowEffectiveStatus === "paused_manual"
-                            ? "Outreach is currently paused."
-                            : null}
-                  </div>
-                  {callingWindowEffectiveStatus === "paused_quiet_hours" ? (
-                    <div className="mt-3 space-y-2">
-                      <div className="text-xs text-zinc-600">
-                        Calls are paused because it is outside the allowed calling window. You can continue now, or resume outreach during the next calling
-                        window.
-                      </div>
-                      {(!sessionId || pausedByCallingWindow) && !isStopped ? <ContinueAnywayButton campaignId={campaign.id} /> : null}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-
-              {!isStopped ? (
-                <div className="ml-auto flex shrink-0 justify-end">
-                  <OutreachControls
-                    campaignId={campaign.id}
-                    hasSession={Boolean(sessionId)}
-                    sessionStatus={sessionStatus || null}
-                    compact
-                    hidePauseResume={pausedByCallingWindow}
-                  />
-                </div>
-              ) : null}
-            </div>
-
-            {isStopped ? (
-              <div className="mt-3 rounded-3xl bg-rose-50 p-4 text-sm text-rose-800 ring-1 ring-rose-200/70">
-                <div className="font-semibold text-rose-900">Outreach stopped</div>
-                <div className="mt-1">
-                  This outreach was stopped. To start calls again, go back to the campaign, review/activate it, and start outreach again.
-                </div>
+            {!isStopped ? (
+              <div className="flex justify-end">
+                <OutreachControls
+                  campaignId={campaign.id}
+                  hasSession={Boolean(sessionId)}
+                  sessionStatus={sessionStatus || null}
+                  compact
+                  hidePauseResume={pausedByCallingWindow}
+                />
               </div>
             ) : null}
           </div>
         </div>
       </header>
 
-      <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <CompactStatCard label="Queued" value={queuedCount.toLocaleString()} delta="Candidates waiting to be called" badgeLabel="Queue" accent="sky" />
-        <CompactStatCard label="Calling" value={callingCount.toLocaleString()} delta="In-progress calls (placeholder)" badgeLabel="Live" accent="indigo" />
-        <CompactStatCard label="Completed" value={completedCount.toLocaleString()} delta="Calls completed (placeholder)" badgeLabel="Done" accent="emerald" />
-        <CompactStatCard label="Failed / No answer" value={failedCount.toLocaleString()} delta="Failed or no-answer (placeholder)" badgeLabel="Review" accent="rose" />
-        <CompactStatCard
-          label="Retry scheduled"
-          value={retryScheduledCount.toLocaleString()}
-          delta="Will retry automatically when due"
-          badgeLabel="Retry"
-          accent="amber"
-        />
-        <CompactStatCard
-          label="Callback scheduled"
-          value={callbackScheduledCount.toLocaleString()}
-          delta="Candidate asked for a callback"
-          badgeLabel="Callback"
-          accent="amber"
-        />
+      <section className="mt-6 rounded-3xl bg-white p-6 shadow-sm ring-1 ring-zinc-200/70 sm:p-7">
+        <div className="flex w-full flex-wrap items-start gap-3 sm:flex-nowrap sm:items-center">
+          <div className="flex flex-wrap gap-2 sm:flex-nowrap">
+            <div className="min-w-[180px] rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Outreach status</div>
+              <div className="mt-2">
+                {sessionId ? (
+                  <span
+                    className={[
+                      "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1",
+                      pillClass(sessionStatus || "zinc"),
+                    ].join(" ")}
+                  >
+                    {callSessionLabel(sessionStatus)}
+                  </span>
+                ) : (
+                  <span className="text-sm font-semibold text-zinc-900">No call session yet</span>
+                )}
+              </div>
+            </div>
+            <div className="min-w-[180px] rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Total candidates</div>
+              <div className="mt-2 text-sm font-semibold text-zinc-900">{totalCandidates.toLocaleString()}</div>
+            </div>
+            <div className="min-w-[220px] rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
+              <div className="flex items-start justify-between gap-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Calling window</div>
+                <span
+                  className={[
+                    "rounded-full px-2 py-1 text-xs font-medium ring-1",
+                    callingWindowEffectiveStatus === "active"
+                      ? "bg-emerald-50 text-emerald-700 ring-emerald-200/70"
+                      : callingWindowEffectiveStatus === "override"
+                        ? "bg-indigo-50 text-indigo-800 ring-indigo-200/70"
+                        : callingWindowEffectiveStatus === "inactive"
+                          ? "bg-zinc-100 text-zinc-700 ring-zinc-200/80"
+                          : "bg-amber-50 text-amber-800 ring-amber-200/70",
+                  ].join(" ")}
+                >
+                  {callingWindowEffectiveStatus === "active"
+                    ? "Active"
+                    : callingWindowEffectiveStatus === "override"
+                      ? "Override active"
+                      : callingWindowEffectiveStatus === "inactive"
+                        ? "Inactive"
+                        : "Paused"}
+                </span>
+              </div>
+              <div className="mt-2 text-sm font-semibold text-zinc-900">{callingWindow.windowLabel}</div>
+              <div className="mt-1 text-xs text-zinc-600">Current time: {callingWindow.nowCstLabel}</div>
+              <div className="mt-3 text-sm text-zinc-700">
+                {callingWindowEffectiveStatus === "active"
+                  ? "Calls are currently allowed."
+                  : callingWindowEffectiveStatus === "override"
+                    ? "Calls are currently running outside the calling window due to an override."
+                    : callingWindowEffectiveStatus === "inactive"
+                      ? "Outreach is currently stopped."
+                      : callingWindowEffectiveStatus === "paused_manual"
+                        ? "Outreach is currently paused."
+                        : null}
+              </div>
+              {callingWindowEffectiveStatus === "paused_quiet_hours" ? (
+                <div className="mt-3 space-y-2">
+                  <div className="text-xs text-zinc-600">
+                    Calls are paused because it is outside the allowed calling window. You can continue now, or resume outreach during the next calling
+                    window.
+                  </div>
+                  {(!sessionId || pausedByCallingWindow) && !isStopped ? <ContinueAnywayButton campaignId={campaign.id} /> : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+        </div>
+
+        {isStopped ? (
+          <div className="mt-3 rounded-3xl bg-rose-50 p-4 text-sm text-rose-800 ring-1 ring-rose-200/70">
+            <div className="font-semibold text-rose-900">Outreach stopped</div>
+            <div className="mt-1">
+              This outreach was stopped. To start calls again, go back to the campaign, review/activate it, and start outreach again.
+            </div>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="mt-6 rounded-3xl bg-white p-6 shadow-sm ring-1 ring-zinc-200/70 sm:p-7">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-zinc-900">Call metrics</div>
+            <div className="mt-1 text-sm text-zinc-600">Live totals for this outreach session.</div>
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 lg:grid-cols-6">
+          <CompactStatCard
+            variant="metricsRow"
+            label="Queued"
+            value={queuedCount.toLocaleString()}
+            delta="Candidates waiting to be called"
+            badgeLabel="Queue"
+            accent="sky"
+          />
+          <CompactStatCard
+            variant="metricsRow"
+            label="Calling"
+            value={callingCount.toLocaleString()}
+            delta="In-progress calls (placeholder)"
+            badgeLabel="Live"
+            accent="indigo"
+          />
+          <CompactStatCard
+            variant="metricsRow"
+            label="Completed"
+            value={completedCount.toLocaleString()}
+            delta="Calls completed (placeholder)"
+            badgeLabel="Done"
+            accent="emerald"
+          />
+          <CompactStatCard
+            variant="metricsRow"
+            label="Failed / No answer"
+            value={failedCount.toLocaleString()}
+            delta="Failed or no-answer (placeholder)"
+            badgeLabel="Review"
+            accent="rose"
+          />
+          <CompactStatCard
+            variant="metricsRow"
+            label="Retry scheduled"
+            value={retryScheduledCount.toLocaleString()}
+            delta="Will retry automatically when due"
+            badgeLabel="Retry"
+            accent="amber"
+          />
+          <CompactStatCard
+            variant="metricsRow"
+            label="Callback scheduled"
+            value={callbackScheduledCount.toLocaleString()}
+            delta="Candidate asked for a callback"
+            badgeLabel="Callback"
+            accent="amber"
+          />
+        </div>
       </section>
 
       <section className="mt-6">
@@ -655,18 +730,14 @@ export default async function OutreachPage({
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold text-zinc-900">Candidate call queue</h2>
-              <p className="mt-1 text-sm text-zinc-600">
-                Operational view of each candidate’s call status for this session.
-              </p>
+              <p className="mt-1 text-sm text-zinc-600">Operational view of each candidate’s call status for this session.</p>
             </div>
           </div>
 
           {!sessionId ? (
             <div className="mt-5 rounded-3xl bg-zinc-50 p-4 text-sm text-zinc-700 ring-1 ring-zinc-200/70">
               <div className="font-semibold text-zinc-900">No call session yet</div>
-              <div className="mt-1 text-sm text-zinc-600">
-                Go back to the campaign workflow and click Step 5 “Start calls” to create a queue.
-              </div>
+              <div className="mt-1 text-sm text-zinc-600">Go back to the campaign workflow and click Step 5 “Start calls” to create a queue.</div>
             </div>
           ) : candidateLoadError ? (
             <div className="mt-5 rounded-3xl bg-rose-50 p-4 text-sm text-rose-800 ring-1 ring-rose-200/70">
@@ -679,10 +750,7 @@ export default async function OutreachPage({
                 Tip: scroll right to view retry fields and actions.
               </div>
               <div className="relative overflow-x-auto">
-                <div
-                  className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-white to-white/0"
-                  aria-hidden="true"
-                />
+                <div className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-white to-white/0" aria-hidden="true" />
                 <table className="min-w-full text-left text-sm">
                   <thead className="bg-zinc-50 text-xs font-semibold uppercase tracking-wide text-zinc-500">
                     <tr>
@@ -738,11 +806,7 @@ export default async function OutreachPage({
                             <td className="px-4 py-3 text-zinc-700">{updated ? formatDateTime(updated) : "—"}</td>
                             <td className="px-4 py-3">
                               <div className="flex justify-end">
-                                <RetryNowButton
-                                  campaignId={campaign.id}
-                                  candidateCallId={String(c.id)}
-                                  disabled={!canRetryNow}
-                                />
+                                <RetryNowButton campaignId={campaign.id} candidateCallId={String(c.id)} disabled={!canRetryNow} />
                               </div>
                             </td>
                           </tr>
