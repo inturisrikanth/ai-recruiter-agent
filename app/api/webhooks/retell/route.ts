@@ -683,33 +683,56 @@ export async function POST(request: Request) {
         status: "completed",
       } as Record<string, unknown>;
 
-      const insertWithSnapshot = {
-        ...insertBase,
-        campaign_name: campaignName,
-        metadata: { campaign_name: campaignName },
-      };
+      const insertAttempts: Array<{ label: string; row: Record<string, unknown> }> = [
+        {
+          label: "with_campaign_name_and_metadata",
+          row: { ...insertBase, campaign_name: campaignName, metadata: { campaign_name: campaignName } },
+        },
+        {
+          label: "with_metadata_only",
+          row: { ...insertBase, metadata: { campaign_name: campaignName } },
+        },
+        {
+          label: "with_campaign_name_only",
+          row: { ...insertBase, campaign_name: campaignName },
+        },
+        { label: "base", row: insertBase },
+      ];
 
-      const firstInsert = await billing.from("credit_transactions").insert(insertWithSnapshot);
-      let txErr = firstInsert.error;
+      let txErr: { code?: unknown; message?: string } | null = null;
+      let inserted = false;
 
-      // Backward compatibility: retry without missing optional columns (deploy-order safe).
-      if (txErr) {
-        const lower = String(txErr.message ?? "").toLowerCase();
-        if (lower.includes("metadata") && !lower.includes("campaign_name")) {
-          const retry = await billing.from("credit_transactions").insert({ ...insertBase, campaign_name: campaignName });
-          txErr = retry.error;
-        } else if (lower.includes("campaign_name") && !lower.includes("metadata")) {
-          const retry = await billing.from("credit_transactions").insert({ ...insertBase, metadata: { campaign_name: campaignName } });
-          txErr = retry.error;
-        } else if (lower.includes("campaign_name") && lower.includes("metadata")) {
-          const retry = await billing.from("credit_transactions").insert(insertBase);
-          txErr = retry.error;
+      for (const attempt of insertAttempts) {
+        console.log("[retell-webhook] billing tx insert attempt", { call_id: retellCallId, txId, attempt: attempt.label });
+        const res = await billing.from("credit_transactions").insert(attempt.row);
+        if (!res.error) {
+          inserted = true;
+          txErr = null;
+          console.log("[retell-webhook] billing tx insert success", { call_id: retellCallId, txId, attempt: attempt.label });
+          break;
+        }
+
+        txErr = res.error as unknown as { code?: unknown; message?: string };
+        const code = String(txErr?.code ?? "");
+        const message = String(txErr?.message ?? "");
+        console.warn("[retell-webhook] billing tx insert failed", {
+          call_id: retellCallId,
+          txId,
+          attempt: attempt.label,
+          code: code || null,
+          message,
+        });
+
+        // Idempotency: treat duplicates as success and skip deduct.
+        if (code === "23505") {
+          inserted = true;
+          break;
         }
       }
 
       // If already charged, skip deduct.
-      const isDuplicate = Boolean((txErr as { code?: unknown } | null)?.code === "23505");
-      if (!txErr || isDuplicate) {
+      const isDuplicate = Boolean(String((txErr as { code?: unknown } | null)?.code ?? "") === "23505");
+      if (inserted) {
         if (isDuplicate) {
           console.log("[retell-webhook] billing skipped (duplicate)", { call_id: retellCallId, txId });
         } else {
@@ -776,11 +799,13 @@ export async function POST(request: Request) {
           }
         }
       } else {
-        console.warn("[retell-webhook] credit transaction insert failed", {
+        console.error("[retell-webhook] billing failed (tx insert)", {
           call_id: retellCallId,
           code: (txErr as { code?: unknown } | null)?.code ?? null,
-          message: txErr.message,
+          message: String((txErr as { message?: unknown } | null)?.message ?? ""),
         });
+        // Return 500 so Retell retries; billing is idempotent via deterministic txId.
+        return NextResponse.json({ error: "Billing transaction insert failed." }, { status: 500 });
       }
     } else {
       console.warn("[retell-webhook] billing skipped (missing user/campaign)", {
