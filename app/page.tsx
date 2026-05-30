@@ -35,6 +35,76 @@ function formatRelativeTime(iso: string | null | undefined) {
   return rtf.format(diffYr, "year");
 }
 
+function TodayBadge({ tone, children }: { tone: "emerald" | "amber" | "sky" | "zinc"; children: ReactNode }) {
+  const cls =
+    tone === "emerald"
+      ? "bg-emerald-50 text-emerald-700 ring-emerald-200/70"
+      : tone === "amber"
+        ? "bg-amber-50 text-amber-800 ring-amber-200/70"
+        : tone === "sky"
+          ? "bg-sky-50 text-sky-800 ring-sky-200/70"
+          : "bg-zinc-100 text-zinc-700 ring-zinc-200/80";
+  return <span className={["rounded-full px-2 py-1 text-xs font-semibold ring-1", cls].join(" ")}>{children}</span>;
+}
+
+function ActivityIcon({ kind }: { kind: "check" | "phone" | "doc" | "card" | "briefcase" | "dot" }) {
+  const common = "size-4 text-zinc-500";
+  if (kind === "check") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" className={common} fill="none">
+        <path d="M20 6.5 9.5 17 4 11.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (kind === "phone") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" className={common} fill="none">
+        <path
+          d="M7.8 4.9 9.7 6.8c.4.4.5 1 .2 1.5l-1 1.6c-.3.5-.2 1.1.1 1.6 1.3 1.9 3 3.6 4.9 4.9.5.3 1.1.4 1.6.1l1.6-1c.5-.3 1.1-.2 1.5.2l1.9 1.9c.5.5.5 1.2 0 1.7l-1 1c-.8.8-1.9 1.1-3 .8-6.8-1.8-12.1-7.1-13.9-13.9-.3-1.1 0-2.2.8-3l1-1c.5-.5 1.2-.5 1.7 0Z"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+  if (kind === "doc") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" className={common} fill="none">
+        <path d="M7 3.5h7l3 3v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-15a2 2 0 0 1 2-2Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+        <path d="M14 3.5v3a1 1 0 0 0 1 1h3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (kind === "card") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" className={common} fill="none">
+        <path d="M4.5 8.5A3 3 0 0 1 7.5 5.5h9A3 3 0 0 1 19.5 8.5v7a3 3 0 0 1-3 3h-9a3 3 0 0 1-3-3v-7Z" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M4.8 10h14.4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (kind === "briefcase") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" className={common} fill="none">
+        <path d="M9 7.5V6.3c0-1 0.8-1.8 1.8-1.8h2.4c1 0 1.8.8 1.8 1.8v1.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <path d="M5.5 8.5h13c.9 0 1.5.7 1.5 1.5v8c0 .9-.7 1.5-1.5 1.5h-13c-.9 0-1.5-.7-1.5-1.5v-8c0-.9.7-1.5 1.5-1.5Z" stroke="currentColor" strokeWidth="1.6" />
+      </svg>
+    );
+  }
+  return <span className="mt-1 inline-block size-2 rounded-full bg-zinc-300" aria-hidden="true" />;
+}
+
+function iconKindForActivityTitle(title: string) {
+  const t = title.toLowerCase();
+  if (t.startsWith("outreach completed")) return "check" as const;
+  if (t.startsWith("call completed")) return "phone" as const;
+  if (t.includes("report")) return "doc" as const;
+  if (t.includes("credit")) return "card" as const;
+  if (t.startsWith("campaign \"") && t.includes("created")) return "briefcase" as const;
+  return "dot" as const;
+}
+
 export default async function Home() {
   const supabase = await createSupabaseServerClient();
   const {
@@ -89,7 +159,7 @@ export default async function Home() {
     { count: draftCampaignsCount },
     { count: readyCampaignsCount },
     { count: completedCampaignsCount },
-    { count: pausedOutreachCount },
+    { data: pausedSessionsData },
     { count: completedOutreachCount },
     { data: completedSessions },
   ] = await Promise.all([
@@ -102,9 +172,11 @@ export default async function Home() {
       .eq("status", "Completed"),
     supabase
       .from("campaign_call_sessions")
-      .select("id", { count: "exact", head: true })
+      .select("campaign_id,status,updated_at,created_at")
       .eq("user_id", user.id)
-      .in("status", ["paused_manual", "paused_calling_window"]),
+      .in("status", ["paused_manual", "paused_calling_window", "paused_credits"])
+      .order("updated_at", { ascending: false })
+      .limit(50000),
     supabase.from("campaign_call_sessions").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "completed"),
     supabase.from("campaign_call_sessions").select("campaign_id").eq("user_id", user.id).eq("status", "completed").limit(50000),
   ]);
@@ -120,7 +192,24 @@ export default async function Home() {
   const completedCount = Number(completedCampaignsCount ?? 0);
   const setupCount = draftCount + readyCount;
 
-  const awaitingOutreachCount = Number(pausedOutreachCount ?? 0);
+  // Awaiting action should reflect *active* paused outreach, not historical/irrelevant rows.
+  // Count unique campaigns with a paused session where the campaign itself is not completed.
+  const pausedCampaignIds = Array.from(
+    new Set(
+      ((pausedSessionsData ?? []) as Array<{ campaign_id: unknown }>)
+        .map((r) => String(r.campaign_id ?? ""))
+        .filter(Boolean),
+    ),
+  );
+  const { count: awaitingCampaignsCount } = pausedCampaignIds.length
+    ? await supabase
+        .from("campaigns")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .in("id", pausedCampaignIds)
+        .neq("status", "Completed")
+    : { count: 0 };
+  const awaitingOutreachCount = Number(awaitingCampaignsCount ?? 0);
   const outreachCompletedCount = Number(completedOutreachCount ?? 0);
 
   const reportsCount = Number(reportsAvailableCount ?? 0);
@@ -141,13 +230,13 @@ export default async function Home() {
     });
   }
 
-  if (awaitingOutreachCount > 0) {
+  if (awaitingOutreachCount > 0 || outreachCompletedCount > 0) {
     today.push({
       title: "Outreach",
       detail: (
         <>
-          <span className="block">{outreachCompletedCount} completed</span>
-          <span className="block">{awaitingOutreachCount} awaiting action</span>
+          {outreachCompletedCount > 0 ? <span className="block">{outreachCompletedCount} completed</span> : null}
+          {awaitingOutreachCount > 0 ? <span className="block">{awaitingOutreachCount} awaiting action</span> : null}
         </>
       ),
       href: "/outreach",
@@ -360,15 +449,37 @@ export default async function Home() {
           <div className="mt-4 grid gap-3">
             {today.length ? (
               today.map((t) => (
-                <div key={t.title} className="rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
+                <div
+                  key={t.title}
+                  className="rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70 transition hover:bg-white/60 hover:shadow-sm"
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-sm font-semibold text-zinc-900">{t.title}</div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="text-sm font-semibold text-zinc-900">{t.title}</div>
+                        {t.title === "Outreach" ? (
+                          awaitingOutreachCount > 0 ? (
+                            <TodayBadge tone="amber">Pending</TodayBadge>
+                          ) : outreachCompletedCount > 0 ? (
+                            <TodayBadge tone="emerald">Completed</TodayBadge>
+                          ) : null
+                        ) : t.title === "Reports" ? (
+                          reportsCount > 0 ? (
+                            <TodayBadge tone="sky">Available</TodayBadge>
+                          ) : null
+                        ) : t.title === "Campaigns" ? (
+                          draftCount + readyCount > 0 ? (
+                            <TodayBadge tone="amber">Pending</TodayBadge>
+                          ) : completedCount > 0 ? (
+                            <TodayBadge tone="emerald">Completed</TodayBadge>
+                          ) : null
+                        ) : null}
+                      </div>
                       <div className="mt-1 text-sm leading-6 text-zinc-600">{t.detail}</div>
                     </div>
                     <Link
                       href={t.href}
-                      className="shrink-0 rounded-2xl bg-white px-3 py-2 text-xs font-semibold text-zinc-900 shadow-sm ring-1 ring-zinc-200/70 hover:bg-zinc-50"
+                      className="shrink-0 rounded-2xl bg-white px-3 py-2 text-xs font-semibold text-zinc-900 shadow-sm ring-1 ring-zinc-200/70 transition hover:-translate-y-0.5 hover:bg-zinc-50 hover:shadow-md"
                     >
                       Open
                     </Link>
@@ -385,7 +496,7 @@ export default async function Home() {
         </div>
       }
     >
-      <header className="flex flex-col gap-3 rounded-3xl bg-white p-5 shadow-sm ring-1 ring-zinc-200/70 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+      <header className="flex flex-col gap-3 rounded-3xl bg-gradient-to-br from-white via-white to-indigo-50/40 p-5 shadow-sm ring-1 ring-zinc-200/70 sm:flex-row sm:items-center sm:justify-between sm:p-6">
         <div>
           <div className="text-sm font-medium text-zinc-500">Overview</div>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 sm:text-3xl">
@@ -398,13 +509,13 @@ export default async function Home() {
         <div className="flex flex-wrap gap-2">
           <Link
             href="/workspace"
-            className="inline-flex h-10 items-center justify-center rounded-full bg-indigo-600 px-4 text-sm font-medium text-white shadow-sm ring-1 ring-indigo-500/20 hover:bg-indigo-500"
+            className="inline-flex h-10 items-center justify-center rounded-full bg-indigo-600 px-4 text-sm font-medium text-white shadow-sm ring-1 ring-indigo-500/20 transition hover:-translate-y-0.5 hover:bg-indigo-500 hover:shadow-md"
           >
             Go to workspace
           </Link>
           <Link
             href="/reports"
-            className="inline-flex h-10 items-center justify-center rounded-full bg-white px-4 text-sm font-medium text-zinc-900 shadow-sm ring-1 ring-zinc-200/70 hover:bg-zinc-50"
+            className="inline-flex h-10 items-center justify-center rounded-full bg-white px-4 text-sm font-medium text-zinc-900 shadow-sm ring-1 ring-zinc-200/70 transition hover:-translate-y-0.5 hover:bg-zinc-50 hover:shadow-md"
           >
             View reports
           </Link>
@@ -440,11 +551,19 @@ export default async function Home() {
           <div className="divide-y divide-zinc-200/70">
             {recentActivity.length ? (
               recentActivity.map((a) => (
-                <div key={`${a.title}-${a.time}`} className="px-4 py-4 hover:bg-zinc-50/60">
+                <div
+                  key={`${a.title}-${a.time}`}
+                  className="px-4 py-4 transition hover:bg-zinc-50/60"
+                >
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div className="mt-0.5 grid size-8 place-items-center rounded-2xl bg-zinc-50 ring-1 ring-zinc-200/70">
+                        <ActivityIcon kind={iconKindForActivityTitle(a.title)} />
+                      </div>
+                      <div className="min-w-0">
                       <div className="text-sm font-semibold text-zinc-900">{a.title}</div>
                       <div className="mt-1 text-sm leading-6 text-zinc-600">{a.detail}</div>
+                      </div>
                     </div>
                     <div className="shrink-0 text-xs font-medium text-zinc-500">{a.time}</div>
                   </div>
