@@ -154,6 +154,28 @@ export default async function CampaignReviewPage({ params }: { params: Promise<{
     .eq("user_id", user.id)
     .maybeSingle();
 
+  const { data: attachedTemplate, error: attachedTemplateError } = await supabase
+    .from("campaign_call_setup_templates")
+    .select("call_setup_template_id")
+    .eq("campaign_id", id)
+    .eq("user_id", user.id)
+    .limit(1)
+    .maybeSingle();
+
+  const attachedTemplateId =
+    !attachedTemplateError && attachedTemplate?.call_setup_template_id ? String(attachedTemplate.call_setup_template_id) : "";
+
+  const { data: templateExistsRow, error: templateExistsError } = attachedTemplateId
+    ? await supabase
+        .from("call_setup_templates")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("id", attachedTemplateId)
+        .maybeSingle()
+    : { data: null, error: null };
+
+  const hasCallTemplate = !templateExistsError && Boolean(templateExistsRow?.id);
+
   const companyName = String(callConfig?.company_name ?? "").trim();
   const selectedQuestions = Array.isArray(callConfig?.selected_questions)
     ? callConfig?.selected_questions.map((q: unknown) => String(q ?? "").trim()).filter(Boolean)
@@ -170,7 +192,8 @@ export default async function CampaignReviewPage({ params }: { params: Promise<{
     !isBlank(campaign.requiredSkills) &&
     !isBlank(campaign.employmentType);
   const hasCandidates = totalLists > 0 && totalCandidates > 0;
-  const hasCallConfig = Boolean(companyName) && (selectedQuestions.length > 0 || customQuestions.length > 0 || callNotes.length > 0);
+  const hasCallConfig =
+    hasCallTemplate && Boolean(companyName) && (selectedQuestions.length > 0 || customQuestions.length > 0 || callNotes.length > 0);
 
   // Lightweight warnings (best-effort).
   let missingPhoneCount: number | null = null;
@@ -241,8 +264,10 @@ export default async function CampaignReviewPage({ params }: { params: Promise<{
         ? "Complete campaign details first."
         : !hasCandidates
           ? "Attach candidate lists first."
-          : !hasCallConfig
-            ? "Complete call configuration first."
+          : !hasCallTemplate
+            ? "Select a call setup template first."
+            : !hasCallConfig
+              ? "Complete call configuration first."
             : null;
 
   return (

@@ -193,7 +193,7 @@ export function DuplicateCampaignAction({ campaignId }: { campaignId: string }) 
                       disabled={isSaving}
                       onChange={setCopy2}
                       label="Step 2 — Candidates"
-                      description="Deep-copies attached candidate lists and candidate rows into new lists."
+                      description="Reuses the same attached candidate lists (no list/candidate copies are created)."
                     />
                     <StepCheckbox
                       checked={copy3}

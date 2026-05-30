@@ -163,7 +163,30 @@ export default async function CampaignDetailPage({
     .eq("campaign_id", id)
     .eq("user_id", user.id)
     .maybeSingle();
-  const callsConfigured = !callConfigError && Boolean(callConfig?.id);
+
+  const { data: attachedTemplate, error: attachedTemplateError } = await supabase
+    .from("campaign_call_setup_templates")
+    .select("call_setup_template_id")
+    .eq("campaign_id", id)
+    .eq("user_id", user.id)
+    .limit(1)
+    .maybeSingle();
+
+  const attachedTemplateId =
+    !attachedTemplateError && attachedTemplate?.call_setup_template_id ? String(attachedTemplate.call_setup_template_id) : "";
+
+  const { data: templateExistsRow, error: templateExistsError } = attachedTemplateId
+    ? await supabase
+        .from("call_setup_templates")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("id", attachedTemplateId)
+        .maybeSingle()
+    : { data: null, error: null };
+
+  const hasCallConfig = !callConfigError && Boolean(callConfig?.id);
+  const hasValidTemplate = !templateExistsError && Boolean(templateExistsRow?.id);
+  const callsConfigured = hasCallConfig && hasValidTemplate;
 
   const activeSessionStatuses: string[] = ["queued", "running", "paused"];
   const { data: activeSession, error: activeSessionError } = await supabase

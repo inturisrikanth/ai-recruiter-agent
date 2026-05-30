@@ -106,6 +106,18 @@ export default async function CallsPage({
   const initialAttachedTemplateId =
     !attachedError && attached?.call_setup_template_id ? String(attached.call_setup_template_id) : null;
 
+  const { data: existingCallConfig, error: existingCallConfigError } = await supabase
+    .from("call_configurations")
+    .select("id")
+    .eq("campaign_id", campaignId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const initialTemplateNotice =
+    !existingCallConfigError && existingCallConfig?.id && !initialAttachedTemplateId
+      ? "The previously selected template is missing. Please select a new template."
+      : null;
+
   return (
     <AppShell>
       {templatesError ? (
@@ -118,6 +130,7 @@ export default async function CallsPage({
           campaignId={campaignId}
           templates={templates}
           initialAttachedTemplateId={initialAttachedTemplateId}
+          initialTemplateNotice={initialTemplateNotice}
         />
       )}
     </AppShell>

@@ -78,6 +78,47 @@ export function CallSetupTemplatesManager({
       return;
     }
 
+    // Block deletion if template is still attached to any non-completed campaign.
+    const { data: linkedCampaigns, error: linkedErr } = await supabase
+      .from("campaign_call_setup_templates")
+      .select("campaign_id")
+      .eq("call_setup_template_id", templateId)
+      .eq("user_id", user.id)
+      .limit(5000);
+    if (linkedErr) {
+      setIsDeleting(null);
+      window.alert(linkedErr.message);
+      return;
+    }
+
+    const linkedCampaignIds = Array.from(
+      new Set(
+        (linkedCampaigns ?? [])
+          .map((r: { campaign_id: unknown }) => String(r.campaign_id ?? ""))
+          .filter(Boolean),
+      ),
+    );
+    if (linkedCampaignIds.length) {
+      const { data: activeCampaign, error: activeErr } = await supabase
+        .from("campaigns")
+        .select("id,status")
+        .eq("user_id", user.id)
+        .in("id", linkedCampaignIds)
+        .neq("status", "Completed")
+        .limit(1)
+        .maybeSingle();
+      if (activeErr) {
+        setIsDeleting(null);
+        window.alert(activeErr.message);
+        return;
+      }
+      if (activeCampaign?.id) {
+        setIsDeleting(null);
+        window.alert("This template is currently used by active or unfinished campaigns. Remove or replace it before deleting.");
+        return;
+      }
+    }
+
     const { error } = await supabase.from("call_setup_templates").delete().eq("id", templateId).eq("user_id", user.id);
     setIsDeleting(null);
     if (error) {

@@ -524,6 +524,46 @@ export function CandidateListsManager({
       return;
     }
 
+    // Block deletion if list is still attached to any non-completed campaign.
+    const { data: linkedCampaigns, error: linkedErr } = await supabase
+      .from("campaign_candidate_lists")
+      .select("campaign_id")
+      .eq("list_id", listId)
+      .eq("user_id", user.id)
+      .limit(5000);
+    if (linkedErr) {
+      window.alert(linkedErr.message);
+      return;
+    }
+
+    const linkedCampaignIds = Array.from(
+      new Set(
+        (linkedCampaigns ?? [])
+          .map((r: { campaign_id: unknown }) => String(r.campaign_id ?? ""))
+          .filter(Boolean),
+      ),
+    );
+    if (linkedCampaignIds.length) {
+      const { data: activeCampaign, error: activeErr } = await supabase
+        .from("campaigns")
+        .select("id,status")
+        .eq("user_id", user.id)
+        .in("id", linkedCampaignIds)
+        .neq("status", "Completed")
+        .limit(1)
+        .maybeSingle();
+      if (activeErr) {
+        window.alert(activeErr.message);
+        return;
+      }
+      if (activeCampaign?.id) {
+        window.alert(
+          "This candidate list is currently used by active or unfinished campaigns. Remove it from those campaigns before deleting.",
+        );
+        return;
+      }
+    }
+
     const { error } = await supabase.from("candidate_lists").delete().eq("id", listId).eq("user_id", user.id);
     if (error) {
       window.alert(error.message);

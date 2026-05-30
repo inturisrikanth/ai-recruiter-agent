@@ -58,17 +58,23 @@ export function CampaignCallSetupTemplatesSelector({
   campaignId,
   templates,
   initialAttachedTemplateId,
+  initialTemplateNotice,
 }: {
   campaignId: string;
   templates: CallSetupTemplateRow[];
   initialAttachedTemplateId?: string | null;
+  initialTemplateNotice?: string | null;
 }) {
   const supabase = getSupabaseBrowserClient();
   const router = useRouter();
 
+  const previouslyAttachedId = String(initialAttachedTemplateId ?? "").trim();
+  const previouslyAttachedExists = previouslyAttachedId.length ? templates.some((t) => t.id === previouslyAttachedId) : false;
+  const missingPreviouslyAttached = previouslyAttachedId.length > 0 && !previouslyAttachedExists;
+
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>(() => {
-    const value = String(initialAttachedTemplateId ?? "").trim();
-    return value.length ? value : "";
+    if (!previouslyAttachedId.length) return "";
+    return previouslyAttachedExists ? previouslyAttachedId : "";
   });
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [isAttaching, setIsAttaching] = useState(false);
@@ -160,7 +166,7 @@ export function CampaignCallSetupTemplatesSelector({
     }
   }
 
-  const selectionCount = selectedTemplateId ? 1 : 0;
+  const selectionCount = selectedTemplate ? 1 : 0;
 
   return (
     <div>
@@ -201,6 +207,18 @@ export function CampaignCallSetupTemplatesSelector({
         </div>
         <div className="mt-1 text-sm text-indigo-800">Choose an existing template below or create a new one.</div>
       </div>
+
+      {missingPreviouslyAttached ? (
+        <div className="mt-6 rounded-3xl bg-amber-50 p-5 text-sm text-amber-900 ring-1 ring-amber-200/70 sm:p-6">
+          <div className="text-sm font-semibold text-amber-900">Template missing</div>
+          <div className="mt-1 text-amber-800">The previously selected template was deleted. Please select a new template.</div>
+        </div>
+      ) : initialTemplateNotice ? (
+        <div className="mt-6 rounded-3xl bg-amber-50 p-5 text-sm text-amber-900 ring-1 ring-amber-200/70 sm:p-6">
+          <div className="text-sm font-semibold text-amber-900">Action required</div>
+          <div className="mt-1 text-amber-800">{initialTemplateNotice}</div>
+        </div>
+      ) : null}
 
       {selectionError ? (
         <div className="mt-6 rounded-3xl bg-rose-50 p-5 text-sm text-rose-800 ring-1 ring-rose-200/70 sm:p-6">
