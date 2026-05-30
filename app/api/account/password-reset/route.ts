@@ -14,7 +14,7 @@ export async function POST() {
 
   const h = await headers();
   const origin = h.get("origin") ?? h.get("x-forwarded-host") ?? null;
-  const redirectTo = origin ? (origin.startsWith("http") ? `${origin}/login` : `https://${origin}/login`) : undefined;
+  const redirectTo = origin ? (origin.startsWith("http") ? `${origin}/reset-password` : `https://${origin}/reset-password`) : undefined;
 
   const { error } = await supabase.auth.resetPasswordForEmail(email, redirectTo ? { redirectTo } : undefined);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });

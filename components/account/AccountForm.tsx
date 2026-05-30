@@ -20,6 +20,8 @@ export function AccountForm(props: {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteText, setDeleteText] = useState("");
 
   const [firstName, setFirstName] = useState(props.firstName ?? "");
   const [lastName, setLastName] = useState(props.lastName ?? "");
@@ -55,7 +57,20 @@ export function AccountForm(props: {
       setError(payload?.error || "Couldn’t send password reset email.");
       return;
     }
-    setSuccess("Password reset email sent.");
+    setSuccess("Password reset email sent. Please check your inbox.");
+  }
+
+  async function deleteAccount() {
+    setError(null);
+    setSuccess(null);
+    const res = await fetch("/api/account/delete", { method: "POST" });
+    const payload = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    if (!res.ok) {
+      setError(payload?.error || "Couldn’t delete account.");
+      return;
+    }
+    router.replace("/login");
+    router.refresh();
   }
 
   return (
@@ -126,6 +141,78 @@ export function AccountForm(props: {
           </button>
         </div>
       </div>
+
+      <div className="mt-2 rounded-3xl bg-rose-50/40 p-5 ring-1 ring-rose-200/70">
+        <div className="text-sm font-semibold text-rose-900">Danger zone</div>
+        <p className="mt-1 text-sm leading-6 text-rose-900/80">
+          Deleting your account will remove your access and may delete your campaigns, candidates, reports, and billing data depending on system retention rules.
+        </p>
+        <button
+          type="button"
+          disabled={isPending}
+          onClick={() => {
+            setError(null);
+            setSuccess(null);
+            setDeleteText("");
+            setDeleteOpen(true);
+          }}
+          className={[
+            "mt-4 inline-flex h-11 items-center justify-center rounded-full bg-white px-5 text-sm font-semibold text-rose-700 shadow-sm ring-1 ring-rose-200/70 hover:bg-rose-50",
+            isPending ? "cursor-not-allowed opacity-60" : "",
+          ].join(" ")}
+        >
+          Delete account
+        </button>
+      </div>
+
+      {deleteOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button
+            type="button"
+            aria-label="Close"
+            className="absolute inset-0 bg-zinc-950/40"
+            onClick={() => setDeleteOpen(false)}
+          />
+          <div className="relative w-[92vw] max-w-[480px] rounded-3xl bg-white p-6 shadow-xl ring-1 ring-zinc-200/70">
+            <div className="text-sm font-semibold text-zinc-900">Confirm account deletion</div>
+            <p className="mt-2 text-sm leading-6 text-zinc-600">
+              This is permanent. Type <span className="font-semibold text-zinc-900">DELETE</span> to confirm.
+            </p>
+            <div className="mt-4">
+              <input
+                value={deleteText}
+                onChange={(e) => setDeleteText(e.target.value)}
+                className={inputClass()}
+                placeholder="Type DELETE"
+                autoComplete="off"
+              />
+            </div>
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                className="inline-flex h-11 items-center justify-center rounded-full bg-white px-5 text-sm font-semibold text-zinc-900 shadow-sm ring-1 ring-zinc-200/70 hover:bg-zinc-50"
+                onClick={() => setDeleteOpen(false)}
+                disabled={isPending}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isPending || deleteText.trim().toUpperCase() !== "DELETE"}
+                onClick={() => startTransition(deleteAccount)}
+                className={[
+                  "inline-flex h-11 items-center justify-center rounded-full px-5 text-sm font-semibold shadow-sm ring-1",
+                  isPending || deleteText.trim().toUpperCase() !== "DELETE"
+                    ? "cursor-not-allowed bg-rose-200 text-rose-700 ring-rose-200/70"
+                    : "bg-rose-600 text-white ring-rose-500/20 hover:bg-rose-500",
+                ].join(" ")}
+              >
+                Delete account
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
