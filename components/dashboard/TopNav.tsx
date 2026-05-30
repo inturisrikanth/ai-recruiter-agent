@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { NotificationsBell } from "@/components/notifications/NotificationsBell";
 
 type TopNavItem = {
   label: string;
@@ -102,6 +103,8 @@ export function TopNav() {
   const pathname = usePathname();
   const router = useRouter();
   const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const accountRef = useRef<HTMLDetailsElement | null>(null);
 
   const items: TopNavItem[] = [
     { label: "Home", href: "/", match: (p) => p === "/", icon: IconHome },
@@ -125,6 +128,19 @@ export function TopNav() {
       icon: IconFinances,
     },
   ];
+
+  useEffect(() => {
+    if (!accountOpen) return;
+    const opts = { capture: true } as const;
+    function onPointerDown(e: MouseEvent) {
+      const el = accountRef.current;
+      if (!el) return;
+      if (el.contains(e.target as Node)) return;
+      setAccountOpen(false);
+    }
+    window.addEventListener("mousedown", onPointerDown, opts);
+    return () => window.removeEventListener("mousedown", onPointerDown, opts);
+  }, [accountOpen]);
 
   return (
     <div className="sticky top-0 z-30 border-b border-zinc-200/70 bg-white/70 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/60">
@@ -208,42 +224,26 @@ export function TopNav() {
             </label>
           </div>
 
-          <button
-            type="button"
-            className="hidden sm:inline-flex h-11 items-center gap-2 rounded-full bg-white px-4 text-sm font-medium text-zinc-950 shadow-sm ring-1 ring-zinc-200/70 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/30"
-          >
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 24 24"
-              className="size-5 text-zinc-700"
-              fill="none"
-            >
-              <path
-                d="M12 3.5c2.8 0 5 2.2 5 5v2.3c0 .7.3 1.4.8 1.9l.8.8c.3.3.1.9-.3.9H5.7c-.5 0-.7-.6-.3-.9l.8-.8c.5-.5.8-1.2.8-1.9V8.5c0-2.8 2.2-5 5-5Z"
-                stroke="currentColor"
-                strokeWidth="1.6"
-              />
-              <path
-                d="M9.5 18a2.5 2.5 0 0 0 5 0"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-              />
-            </svg>
-            <span className="hidden md:inline">Notifications</span>
-            <span className="grid size-5 place-items-center rounded-full bg-zinc-900 text-xs font-semibold text-white">
-              3
-            </span>
-          </button>
+          <div className="hidden sm:block">
+            <NotificationsBell />
+          </div>
 
-          <details className="relative">
+          <details
+            ref={accountRef}
+            className="relative"
+            open={accountOpen}
+            onToggle={(e) => {
+              const next = (e.currentTarget as HTMLDetailsElement).open;
+              setAccountOpen(next);
+            }}
+          >
             <summary
               aria-label="Account"
               className="list-none [&::-webkit-details-marker]:hidden cursor-pointer"
               onClick={() => setLogoutError(null)}
             >
               <span className="grid size-11 place-items-center rounded-full bg-white shadow-sm ring-1 ring-zinc-200/70 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/30">
-                <svg aria-hidden="true" viewBox="0 0 24 24" className="size-5 text-zinc-800" fill="none">
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="size-5 text-zinc-600" fill="none">
                   <path
                     d="M12 12.2a4.2 4.2 0 1 0 0-8.4 4.2 4.2 0 0 0 0 8.4Z"
                     stroke="currentColor"
@@ -263,7 +263,10 @@ export function TopNav() {
                 <Link
                   href="/account"
                   className="flex w-full items-center justify-between rounded-2xl px-3 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50"
-                  onClick={() => setLogoutError(null)}
+                  onClick={() => {
+                    setLogoutError(null);
+                    setAccountOpen(false);
+                  }}
                 >
                   Account
                   <span className="text-xs font-medium text-zinc-400">→</span>
@@ -273,6 +276,7 @@ export function TopNav() {
                   className="flex w-full items-center justify-between rounded-2xl px-3 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50"
                   onClick={async () => {
                     setLogoutError(null);
+                    setAccountOpen(false);
                     const res = await fetch("/api/auth/logout", { method: "POST" });
                     if (!res.ok) {
                       const payload = (await res.json().catch(() => null)) as { error?: string } | null;

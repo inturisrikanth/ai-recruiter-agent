@@ -79,11 +79,14 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     const sessionId = String(existingSession.id);
 
     if (outsideCallingWindow && !overrideCallingWindow) {
-      const { error: sessionUpdateError } = await supabase
+      const { data: updatedSessions, error: sessionUpdateError } = await supabase
         .from("campaign_call_sessions")
         .update({ status: PAUSED_CALLING_WINDOW, updated_at: now })
         .eq("id", sessionId)
-        .eq("user_id", user.id);
+        .eq("user_id", user.id)
+        .neq("status", PAUSED_CALLING_WINDOW)
+        .select("id")
+        .limit(1);
       if (sessionUpdateError) return NextResponse.json({ error: sessionUpdateError.message }, { status: 500 });
 
       const { error: updateCampaignError } = await supabase
@@ -92,6 +95,20 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
         .eq("id", campaignId)
         .eq("user_id", user.id);
       if (updateCampaignError) return NextResponse.json({ error: updateCampaignError.message }, { status: 500 });
+
+      // Notification: only when transitioning into paused_calling_window.
+      if (updatedSessions?.length) {
+        await supabase.from("notifications").insert({
+          id: sessionId,
+          user_id: user.id,
+          type: "campaign_paused_calling_window",
+          title: "Campaign paused",
+          message: "Your campaign was paused because it is outside calling hours.",
+          related_campaign_id: campaignId,
+          related_url: `/outreach?campaignId=${encodeURIComponent(campaignId)}`,
+          is_read: false,
+        });
+      }
 
       return NextResponse.json(
         {
@@ -214,6 +231,18 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   }
 
   if (outsideCallingWindow && !overrideCallingWindow) {
+    // Notification: paused by calling window (one per session via id).
+    await supabase.from("notifications").insert({
+      id: callSessionId,
+      user_id: user.id,
+      type: "campaign_paused_calling_window",
+      title: "Campaign paused",
+      message: "Your campaign was paused because it is outside calling hours.",
+      related_campaign_id: campaignId,
+      related_url: `/outreach?campaignId=${encodeURIComponent(campaignId)}`,
+      is_read: false,
+    });
+
     return NextResponse.json(
       {
         sessionId: callSessionId,

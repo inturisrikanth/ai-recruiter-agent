@@ -98,11 +98,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (action === "resume") {
     const windowState = getCallingWindowState();
     if (!windowState.withinWindow) {
-      const { error: sessionUpdateError } = await supabase
+      const { data: updatedSessions, error: sessionUpdateError } = await supabase
         .from("campaign_call_sessions")
         .update({ status: PAUSED_CALLING_WINDOW, updated_at: now })
         .eq("id", String(session.id))
-        .eq("user_id", user.id);
+        .eq("user_id", user.id)
+        .neq("status", PAUSED_CALLING_WINDOW)
+        .select("id")
+        .limit(1);
       if (sessionUpdateError) return NextResponse.json({ error: sessionUpdateError.message }, { status: 500 });
 
       const { error: campaignUpdateError } = await supabase
@@ -111,6 +114,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         .eq("id", campaignId)
         .eq("user_id", user.id);
       if (campaignUpdateError) return NextResponse.json({ error: campaignUpdateError.message }, { status: 500 });
+
+      if (updatedSessions?.length) {
+        const sessionId = String(session.id);
+        await supabase.from("notifications").insert({
+          id: sessionId,
+          user_id: user.id,
+          type: "campaign_paused_calling_window",
+          title: "Campaign paused",
+          message: "Your campaign was paused because it is outside calling hours.",
+          related_campaign_id: campaignId,
+          related_url: `/outreach?campaignId=${encodeURIComponent(campaignId)}`,
+          is_read: false,
+        });
+      }
 
       return NextResponse.json({ ok: true, pausedByCallingWindow: true, window: windowState }, { status: 202 });
     }

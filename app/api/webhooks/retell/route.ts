@@ -330,7 +330,7 @@ async function updateSessionRollup(sessionId: string, campaignId: string) {
   // We avoid flipping paused/stopped sessions back to running.
   const { data: sessionRow, error: sessionError } = await supabase
     .from("campaign_call_sessions")
-    .select("status")
+    .select("status,user_id")
     .eq("id", sessionId)
     .maybeSingle();
   if (sessionError) return;
@@ -372,6 +372,43 @@ async function updateSessionRollup(sessionId: string, campaignId: string) {
   if (nextSessionStatus === "completed") {
     // Best-effort campaign completion signal.
     await supabase.from("campaigns").update({ status: "Completed", updated_at: now }).eq("id", campaignId);
+
+    // Notification: one report-ready per completed campaign.
+    const userId = String((sessionRow as { user_id?: unknown } | null)?.user_id ?? "").trim();
+    if (userId) {
+      let billing: ReturnType<typeof createSupabaseServiceRoleClient> | null = null;
+      try {
+        billing = createSupabaseServiceRoleClient();
+      } catch {
+        billing = null;
+      }
+      if (billing) {
+        const txId = deterministicUuidV4(`report_ready:${campaignId}`);
+        const { data: existing } = await billing
+          .from("notifications")
+          .select("id")
+          .eq("id", txId)
+          .maybeSingle();
+        if (!existing?.id) {
+          const { data: campaignRow } = await billing
+            .from("campaigns")
+            .select("campaign_name")
+            .eq("id", campaignId)
+            .maybeSingle();
+          const campaignName = String((campaignRow as { campaign_name?: unknown } | null)?.campaign_name ?? "").trim() || "Campaign";
+          await billing.from("notifications").insert({
+            id: txId,
+            user_id: userId,
+            type: "report_ready",
+            title: "Report ready",
+            message: `The report for ${campaignName} is ready.`,
+            related_campaign_id: campaignId,
+            related_url: `/reports?campaignId=${encodeURIComponent(campaignId)}`,
+            is_read: false,
+          });
+        }
+      }
+    }
   }
 }
 
@@ -769,14 +806,61 @@ export async function POST(request: Request) {
                 next_balance: nextBalance,
                 next_total_used: nextTotalUsed,
               });
+
+              // Notifications: low credits (only on transition into < 10, and only if no unread exists).
+              if (balance >= 10 && nextBalance < 10) {
+                const { data: existingLow } = await billing
+                  .from("notifications")
+                  .select("id")
+                  .eq("user_id", userId)
+                  .eq("type", "low_credits")
+                  .eq("is_read", false)
+                  .limit(1);
+                if (!existingLow?.length) {
+                  const lowId = deterministicUuidV4(`low_credits:${txId}`);
+                  await billing.from("notifications").insert({
+                    id: lowId,
+                    user_id: userId,
+                    type: "low_credits",
+                    title: "Low credit balance",
+                    message: "Your credit balance is below 10. Add credits to avoid campaign interruptions.",
+                    related_campaign_id: null,
+                    related_url: "/finances#buy-credits",
+                    is_read: false,
+                  });
+                }
+              }
+
               if (nextBalance <= 0) {
                 // Auto-pause outreach when credits are exhausted.
                 const sessionId = String((persistedCandidate as { call_session_id?: unknown } | null)?.call_session_id ?? "");
                 if (sessionId) {
+                  const { data: sessionRow } = await billing
+                    .from("campaign_call_sessions")
+                    .select("status")
+                    .eq("id", sessionId)
+                    .maybeSingle();
+                  const wasPausedCredits = String(sessionRow?.status ?? "").toLowerCase() === "paused_credits";
+
                   await Promise.all([
                     supabase.from("campaign_call_sessions").update({ status: "paused_credits", updated_at: new Date().toISOString() }).eq("id", sessionId),
                     supabase.from("campaigns").update({ status: "Paused", updated_at: new Date().toISOString() }).eq("id", campaignId),
                   ]);
+
+                  // Notification: only when transitioning into paused_credits.
+                  if (!wasPausedCredits) {
+                    const pausedId = deterministicUuidV4(`campaign_paused_credits:${campaignId}:${sessionId}`);
+                    await billing.from("notifications").insert({
+                      id: pausedId,
+                      user_id: userId,
+                      type: "campaign_paused_credits",
+                      title: "Campaign paused",
+                      message: "Your campaign was paused because your credits were exhausted.",
+                      related_campaign_id: campaignId,
+                      related_url: `/outreach?campaignId=${encodeURIComponent(campaignId)}`,
+                      is_read: false,
+                    });
+                  }
                 }
               }
               break;

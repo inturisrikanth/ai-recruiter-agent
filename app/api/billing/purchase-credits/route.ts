@@ -44,6 +44,7 @@ export async function POST(request: Request) {
 
   // Update user_credits with a lightweight CAS retry to avoid lost updates on rapid clicks.
   let updated = false;
+  let resultingBalance: number | null = null;
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const { data: row, error: loadErr } = await supabase
       .from("user_credits")
@@ -72,6 +73,7 @@ export async function POST(request: Request) {
 
     if (!updateErr && updatedRows?.length) {
       updated = true;
+      resultingBalance = nextBalance;
       break;
     }
 
@@ -87,6 +89,7 @@ export async function POST(request: Request) {
       });
       if (!insertErr) {
         updated = true;
+        resultingBalance = credits;
         break;
       }
     }
@@ -127,6 +130,28 @@ export async function POST(request: Request) {
 
   if (invErr) {
     return NextResponse.json({ error: invErr.message }, { status: 403 });
+  }
+
+  // Notifications: one per purchase transaction (idempotent by using txId as notification id).
+  await supabase.from("notifications").insert({
+    id: txId,
+    user_id: userId,
+    type: "credit_purchase_completed",
+    title: "Credits added",
+    message: `${credits} credits were added to your account.`,
+    related_campaign_id: null,
+    related_url: "/finances",
+    is_read: false,
+  });
+
+  // If balance is back above low-credit threshold, clear any unread low-credit warning.
+  if (resultingBalance != null && resultingBalance >= 10) {
+    await supabase
+      .from("notifications")
+      .update({ is_read: true, read_at: nowIso })
+      .eq("user_id", userId)
+      .eq("type", "low_credits")
+      .eq("is_read", false);
   }
 
   return NextResponse.json({ ok: true, transaction_id: txId, invoice_number: invNumber, credits });
