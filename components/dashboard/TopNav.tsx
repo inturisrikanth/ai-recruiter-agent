@@ -243,14 +243,31 @@ export function TopNav() {
               onClick={() => setLogoutError(null)}
             >
               <span className="grid size-11 place-items-center rounded-full bg-white shadow-sm ring-1 ring-zinc-200/70 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/30">
-                <span className="text-sm font-semibold text-zinc-900">SI</span>
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="size-5 text-zinc-800" fill="none">
+                  <path
+                    d="M12 12.2a4.2 4.2 0 1 0 0-8.4 4.2 4.2 0 0 0 0 8.4Z"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                  />
+                  <path
+                    d="M4.5 20.2a7.5 7.5 0 0 1 15 0"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                  />
+                </svg>
               </span>
             </summary>
             <div className="absolute right-0 mt-2 w-56 overflow-hidden rounded-3xl bg-white shadow-xl ring-1 ring-zinc-200/70">
-              <div className="border-b border-zinc-200/70 px-4 py-3">
-                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Account</div>
-              </div>
               <div className="p-2">
+                <Link
+                  href="/account"
+                  className="flex w-full items-center justify-between rounded-2xl px-3 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50"
+                  onClick={() => setLogoutError(null)}
+                >
+                  Account
+                  <span className="text-xs font-medium text-zinc-400">→</span>
+                </Link>
                 <button
                   type="button"
                   className="flex w-full items-center justify-between rounded-2xl px-3 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50"

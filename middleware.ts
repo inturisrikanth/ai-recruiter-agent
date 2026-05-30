@@ -5,6 +5,8 @@ function isPublicPath(pathname: string) {
   if (pathname.startsWith("/api/")) return true;
   if (pathname.startsWith("/_next/")) return true;
   if (pathname === "/favicon.ico") return true;
+  if (pathname === "/login") return true;
+  if (pathname === "/signup") return true;
   return false;
 }
 
@@ -34,15 +36,7 @@ export async function middleware(request: NextRequest) {
   const { data } = await supabase.auth.getUser();
   const user = data?.user ?? null;
 
-  if (pathname === "/login") {
-    if (user) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/";
-      url.search = "";
-      return NextResponse.redirect(url);
-    }
-    return response;
-  }
+  if (pathname === "/login" || pathname === "/signup") return response;
 
   if (!user) {
     const url = request.nextUrl.clone();

@@ -103,7 +103,11 @@ function LoginPageInner() {
             </button>
 
             <div className="text-xs text-zinc-500">
-              Having trouble? Check your credentials in Supabase Auth.{" "}
+              New here?{" "}
+              <Link href="/signup" className="font-semibold text-zinc-700 hover:text-zinc-900">
+                Create an account
+              </Link>
+              .{" "}
               <Link href="/" className="font-semibold text-zinc-700 hover:text-zinc-900">
                 Go back
               </Link>
