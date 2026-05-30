@@ -377,7 +377,7 @@ export default async function Home() {
               ))
             ) : (
               <div className="rounded-3xl bg-zinc-50 p-4 ring-1 ring-zinc-200/70">
-                <div className="text-sm font-semibold text-zinc-900">You're all caught up.</div>
+                <div className="text-sm font-semibold text-zinc-900">You&apos;re all caught up.</div>
                 <div className="mt-1 text-sm leading-6 text-zinc-600">No pending actions right now.</div>
               </div>
             )}

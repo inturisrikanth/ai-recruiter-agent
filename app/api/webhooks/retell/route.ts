@@ -657,7 +657,22 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Billing configuration error." }, { status: 500 });
       }
 
-      const { error: txErr } = await billing.from("credit_transactions").insert({
+      // Snapshot campaign name into billing history so deleting campaigns does not erase finance usage rows.
+      let campaignName: string | null = null;
+      try {
+        const { data: campaignRow } = await billing
+          .from("campaigns")
+          .select("campaign_name")
+          .eq("id", campaignId)
+          .maybeSingle();
+        const raw = String((campaignRow as { campaign_name?: unknown } | null)?.campaign_name ?? "").trim();
+        campaignName = raw ? raw : null;
+      } catch {
+        // Best-effort only; billing must still proceed even if campaign lookup fails.
+        campaignName = null;
+      }
+
+      const insertBase = {
         id: txId,
         user_id: userId,
         campaign_id: campaignId,
@@ -666,7 +681,31 @@ export async function POST(request: Request) {
         credits: -1,
         amount_usd: null,
         status: "completed",
-      });
+      } as Record<string, unknown>;
+
+      const insertWithSnapshot = {
+        ...insertBase,
+        campaign_name: campaignName,
+        metadata: { campaign_name: campaignName },
+      };
+
+      const firstInsert = await billing.from("credit_transactions").insert(insertWithSnapshot);
+      let txErr = firstInsert.error;
+
+      // Backward compatibility: retry without missing optional columns (deploy-order safe).
+      if (txErr) {
+        const lower = String(txErr.message ?? "").toLowerCase();
+        if (lower.includes("metadata") && !lower.includes("campaign_name")) {
+          const retry = await billing.from("credit_transactions").insert({ ...insertBase, campaign_name: campaignName });
+          txErr = retry.error;
+        } else if (lower.includes("campaign_name") && !lower.includes("metadata")) {
+          const retry = await billing.from("credit_transactions").insert({ ...insertBase, metadata: { campaign_name: campaignName } });
+          txErr = retry.error;
+        } else if (lower.includes("campaign_name") && lower.includes("metadata")) {
+          const retry = await billing.from("credit_transactions").insert(insertBase);
+          txErr = retry.error;
+        }
+      }
 
       // If already charged, skip deduct.
       const isDuplicate = Boolean((txErr as { code?: unknown } | null)?.code === "23505");

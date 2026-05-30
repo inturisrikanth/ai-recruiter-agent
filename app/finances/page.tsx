@@ -92,58 +92,45 @@ export default async function FinancesPage() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+  const userId = user.id;
 
   const [
-    { count: callsMadeCount },
+    { count: billedCallsCount },
     { data: campaignsData },
-    { data: callCandidateData },
     { data: userCreditsData },
     { data: txData },
-    { data: usageTxData },
     { data: invoiceData },
   ] = await Promise.all([
-    supabase
-      .from("campaign_call_candidates")
+    billing
+      .from("credit_transactions")
       .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id)
-      .not("call_completed_at", "is", null),
+      .eq("user_id", userId)
+      .eq("type", "usage")
+      .eq("status", "completed")
+      .not("campaign_id", "is", null),
     supabase
       .from("campaigns")
       .select("id,campaign_name,status,created_at")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(5000),
     supabase
-      .from("campaign_call_candidates")
-      .select("campaign_id,call_completed_at")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(50000),
-    supabase
       .from("user_credits")
       .select("balance,total_purchased,total_used,updated_at")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
     supabase
       .from("credit_transactions")
       .select("id,type,description,credits,amount_usd,status,created_at")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(25),
-    billing
-      .from("credit_transactions")
-      .select("campaign_id,credits")
-      .eq("user_id", user.id)
-      .eq("type", "usage")
-      .eq("status", "completed")
-      .not("campaign_id", "is", null)
-      .limit(50000),
     supabase
       .from("billing_invoices")
       .select("id,invoice_number,amount_usd,credits,status,invoice_url,created_at")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(25),
   ]);
@@ -155,39 +142,81 @@ export default async function FinancesPage() {
   }));
   const campaignById = new Map(campaigns.filter((c) => c.id).map((c) => [c.id, c]));
 
-  const callsMadeByCampaign = new Map<string, number>();
-  for (const row of (callCandidateData ?? []) as Array<{ campaign_id: unknown; call_completed_at: unknown }>) {
-    const cid = String(row.campaign_id ?? "");
-    if (!cid) continue;
-    const completedAt = String(row.call_completed_at ?? "").trim();
-    if (!completedAt) continue;
-    callsMadeByCampaign.set(cid, (callsMadeByCampaign.get(cid) ?? 0) + 1);
+  // Campaign usage must be derived from permanent billing activity (not campaign/call rows),
+  // so deleted campaigns do not erase finance history.
+  // Backward compatibility: some deployments may not have optional columns yet (campaign_name, metadata).
+  // We retry with progressively smaller projections until the API accepts the select list.
+  async function loadUsageTransactions(): Promise<unknown[]> {
+    const columnAttempts: string[] = [
+      "campaign_id,metadata,campaign_name,credits",
+      "campaign_id,metadata,credits",
+      "campaign_id,campaign_name,credits",
+      "campaign_id,credits",
+    ];
+
+    for (const cols of columnAttempts) {
+      const res = await billing
+        .from("credit_transactions")
+        .select(cols)
+        .eq("user_id", userId)
+        .eq("type", "usage")
+        .eq("status", "completed")
+        .not("campaign_id", "is", null)
+        .limit(50000);
+      if (!res.error) return (res.data ?? []) as unknown[];
+    }
+
+    return [];
   }
+
+  const usageTxData: unknown = await loadUsageTransactions();
 
   const creditsUsedByCampaign = new Map<string, number>();
-  for (const row of (usageTxData ?? []) as Array<{ campaign_id: unknown; credits: unknown }>) {
+  const callsMadeByCampaign = new Map<string, number>();
+  const campaignNameHintById = new Map<string, string>();
+  for (const row of (Array.isArray(usageTxData) ? usageTxData : []) as Array<{
+    campaign_id: unknown;
+    campaign_name?: unknown;
+    metadata?: unknown;
+    credits: unknown;
+  }>) {
     const cid = String(row.campaign_id ?? "");
     if (!cid) continue;
+
+    // Each completed usage transaction represents one billed call.
+    callsMadeByCampaign.set(cid, (callsMadeByCampaign.get(cid) ?? 0) + 1);
+
     const creditsRaw = Number(row.credits ?? 0);
-    if (!Number.isFinite(creditsRaw) || creditsRaw === 0) continue;
-    const used = Math.abs(creditsRaw);
-    creditsUsedByCampaign.set(cid, (creditsUsedByCampaign.get(cid) ?? 0) + used);
+    if (Number.isFinite(creditsRaw) && creditsRaw !== 0) {
+      const used = Math.abs(creditsRaw);
+      creditsUsedByCampaign.set(cid, (creditsUsedByCampaign.get(cid) ?? 0) + used);
+    }
+
+    const nameFromColumn = String(row.campaign_name ?? "").trim();
+    const nameFromMetadata =
+      row.metadata && typeof row.metadata === "object"
+        ? String((row.metadata as { campaign_name?: unknown }).campaign_name ?? "").trim()
+        : "";
+    const nameHint = nameFromMetadata || nameFromColumn;
+    if (nameHint) campaignNameHintById.set(cid, nameHint);
   }
 
-  const usageRows: CampaignUsageRow[] = Array.from(callsMadeByCampaign.entries())
-    .map(([campaignId, callsMade]) => {
-      const c = campaignById.get(campaignId);
-      if (!c) return null;
-      const creditsUsedEstimated = creditsUsedByCampaign.get(campaignId) ?? 0;
-      return {
-        campaignId,
-        campaignName: c.name,
-        campaignStatus: c.status,
-        callsMade,
-        creditsUsedEstimated,
-      };
-    })
-    .filter(Boolean) as CampaignUsageRow[];
+  const usageRows: CampaignUsageRow[] = Array.from(callsMadeByCampaign.entries()).map(([campaignId, callsMade]) => {
+    const existing = campaignById.get(campaignId) ?? null;
+    const campaignName =
+      campaignNameHintById.get(campaignId) ??
+      existing?.name ??
+      "Unknown campaign";
+    const campaignStatus = existing?.status ?? "Campaign Deleted";
+    const creditsUsedEstimated = creditsUsedByCampaign.get(campaignId) ?? 0;
+    return {
+      campaignId,
+      campaignName,
+      campaignStatus,
+      callsMade,
+      creditsUsedEstimated,
+    };
+  });
 
   usageRows.sort((a, b) => b.callsMade - a.callsMade);
 
@@ -197,7 +226,7 @@ export default async function FinancesPage() {
     total_used: Number((userCreditsData as { total_used?: unknown } | null)?.total_used ?? 0),
   };
 
-  const totalCallsMade = Number(callsMadeCount ?? 0);
+  const totalCallsMade = Number(billedCallsCount ?? 0);
   const creditsUsedEstimated = creditsRow.total_used;
   const creditsPurchased = creditsRow.total_purchased;
   const creditBalance = creditsRow.balance;
@@ -295,13 +324,23 @@ export default async function FinancesPage() {
             {usageRows.length ? (
               <div className="overflow-hidden rounded-3xl bg-zinc-50 ring-1 ring-zinc-200/70">
                 <div className="overflow-x-auto">
-                  <table className="min-w-full text-left text-sm">
+                  <table className="min-w-full text-left text-sm md:table-fixed">
+                    <colgroup>
+                      <col className="md:w-[45%]" />
+                      <col className="md:w-[15%]" />
+                      <col className="md:w-[15%]" />
+                      <col className="md:w-[25%]" />
+                    </colgroup>
                     <thead className="bg-white/60 text-xs font-semibold uppercase tracking-wide text-zinc-500">
                       <tr>
                         <th className="px-4 py-3">Campaign</th>
-                        <th className="px-4 py-3 text-right">Calls made</th>
-                        <th className="px-4 py-3 text-right">Credits used</th>
-                        <th className="px-4 py-3">Status</th>
+                        <th className="px-4 py-3 text-right md:text-center">Calls made</th>
+                        <th className="px-4 py-3 text-right md:text-center">Credits used</th>
+                        <th className="px-4 py-3">
+                          <div className="flex justify-end">
+                            <span className="px-2.5">Status</span>
+                          </div>
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-200/70">
@@ -310,12 +349,14 @@ export default async function FinancesPage() {
                           <td className="px-4 py-3">
                             <div className="font-semibold text-zinc-900">{r.campaignName}</div>
                           </td>
-                          <td className="px-4 py-3 text-right text-zinc-700">{formatCount(r.callsMade)}</td>
-                          <td className="px-4 py-3 text-right text-zinc-700">{formatCount(r.creditsUsedEstimated)}</td>
-                          <td className="px-4 py-3">
-                            <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200/80">
-                              {r.campaignStatus}
-                            </span>
+                          <td className="px-4 py-3 text-right text-zinc-700 md:text-center">{formatCount(r.callsMade)}</td>
+                          <td className="px-4 py-3 text-right text-zinc-700 md:text-center">{formatCount(r.creditsUsedEstimated)}</td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex justify-end">
+                              <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200/80">
+                                {r.campaignStatus}
+                              </span>
+                            </div>
                           </td>
                         </tr>
                       ))}
