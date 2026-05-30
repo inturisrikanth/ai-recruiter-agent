@@ -4,6 +4,7 @@ import { CampaignEditAction, type CampaignEditInitial } from "@/components/campa
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 type CampaignStatus = "Draft" | "Ready" | "Calling" | "Paused" | "Completed";
 
@@ -69,10 +70,17 @@ export function CampaignWorkflow(props: {
   callSessionStatus?: string | null;
 }) {
   const { campaignId, candidateCount, callsConfigured, editInitial, status, hasCallSession = false, callSessionStatus } = props;
+  const supabase = getSupabaseBrowserClient();
   const router = useRouter();
   const [isQueueing, setIsQueueing] = useState(false);
   const [queueError, setQueueError] = useState<string | null>(null);
   const [lockNotice, setLockNotice] = useState<string | null>(null);
+  const [creditWarning, setCreditWarning] = useState<{
+    open: boolean;
+    credits: number;
+    candidates: number;
+  }>({ open: false, credits: 0, candidates: 0 });
+  const [creditOverride, setCreditOverride] = useState(false);
   const candidatesComplete = candidateCount > 0;
   const activated = status === "Ready" || status === "Calling" || status === "Paused" || status === "Completed";
   const canStartCalls = status === "Ready";
@@ -123,7 +131,7 @@ export function CampaignWorkflow(props: {
   const reportsAvailable = sessionCompleted || status === "Completed";
   const step6State = reportsAvailable ? ("complete" as const) : ("pending" as const);
 
-  async function onStartCalls() {
+  async function startCallsNow() {
     if (!canStartCalls || isQueueing) return;
     setIsQueueing(true);
     setQueueError(null);
@@ -158,8 +166,116 @@ export function CampaignWorkflow(props: {
     }
   }
 
+  async function onStartCalls() {
+    if (!canStartCalls || isQueueing) return;
+
+    if (!creditOverride && candidateCount > 0) {
+      try {
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+        if (userError || !user) {
+          setQueueError(userError?.message ?? "You must be signed in to start outreach.");
+          return;
+        }
+
+        const { data: creditsRow, error: creditsError } = await supabase
+          .from("user_credits")
+          .select("balance")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        if (creditsError) {
+          setQueueError(creditsError.message);
+          return;
+        }
+
+        const balance = Number((creditsRow as { balance?: unknown } | null)?.balance ?? 0);
+        if (candidateCount > balance) {
+          setCreditWarning({ open: true, credits: balance, candidates: candidateCount });
+          return;
+        }
+      } catch (e) {
+        setQueueError(e instanceof Error ? e.message : "Couldn’t check credits.");
+        return;
+      }
+    }
+
+    await startCallsNow();
+  }
+
   return (
     <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-zinc-200/70 sm:p-6">
+      {creditWarning.open ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Low credit balance"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/30 p-4 backdrop-blur-sm"
+          onMouseDown={(e) => {
+            if (e.currentTarget === e.target) setCreditWarning((prev) => ({ ...prev, open: false }));
+          }}
+        >
+          <div className="w-full max-w-[520px] rounded-3xl bg-white shadow-xl ring-1 ring-zinc-200/70">
+            <div className="flex items-start justify-between gap-4 border-b border-zinc-200/70 px-5 py-5 sm:px-6">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-zinc-900">Low Credit Balance</div>
+                <div className="mt-1 text-sm text-zinc-600">
+                  You currently have <span className="font-semibold text-zinc-900">{creditWarning.credits}</span> credits.
+                  <br />
+                  This campaign contains <span className="font-semibold text-zinc-900">{creditWarning.candidates}</span> candidates.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCreditWarning((prev) => ({ ...prev, open: false }))}
+                className="grid size-10 shrink-0 place-items-center rounded-2xl bg-white text-zinc-700 ring-1 ring-zinc-200/70 hover:bg-zinc-50 hover:text-zinc-900"
+                aria-label="Close"
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4" fill="none">
+                  <path d="M7 7l10 10M17 7 7 17" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="px-5 py-5 text-sm text-zinc-700 sm:px-6">
+              <div>
+                You may run out of credits before all candidates are contacted.
+              </div>
+              <div className="mt-2">
+                Add credits now to avoid interruption.
+              </div>
+            </div>
+
+            <div className="border-t border-zinc-200/70 bg-white px-5 py-4 sm:px-6">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreditWarning((prev) => ({ ...prev, open: false }));
+                    router.push("/finances#buy-credits");
+                  }}
+                  className="inline-flex h-11 items-center justify-center rounded-full bg-white px-5 text-sm font-semibold text-zinc-900 shadow-sm ring-1 ring-zinc-200/70 hover:bg-zinc-50"
+                >
+                  Add Credits
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setCreditOverride(true);
+                    setCreditWarning((prev) => ({ ...prev, open: false }));
+                    await startCallsNow();
+                  }}
+                  className="inline-flex h-11 items-center justify-center rounded-full bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm ring-1 ring-emerald-500/20 hover:bg-emerald-500"
+                >
+                  Continue Anyway
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold text-zinc-900">Workflow</h2>

@@ -43,6 +43,36 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 401 });
   }
 
+  // Credits foundation: ensure the user has a user_credits row.
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+  if (userError || !user) {
+    return NextResponse.json({ error: userError?.message ?? "Couldn’t load user after sign-in." }, { status: 500 });
+  }
+
+  const { data: existingCredits, error: existingCreditsError } = await supabase
+    .from("user_credits")
+    .select("id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (existingCreditsError) {
+    return NextResponse.json({ error: existingCreditsError.message }, { status: 500 });
+  }
+
+  if (!existingCredits?.id) {
+    const { error: createCreditsError } = await supabase.from("user_credits").insert({
+      user_id: user.id,
+      balance: 0,
+      total_purchased: 0,
+      total_used: 0,
+    });
+    if (createCreditsError) {
+      return NextResponse.json({ error: createCreditsError.message }, { status: 500 });
+    }
+  }
+
   return NextResponse.json({ ok: true }, { status: 200 });
 }
 

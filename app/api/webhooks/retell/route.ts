@@ -1,7 +1,9 @@
 import { supabase } from "@/lib/supabaseClient";
 import { startNextQueuedCall } from "@/lib/outreach/startNextQueuedCall";
 import { verifyRetellWebhookSignature } from "@/lib/retell/verifyWebhookSignature";
+import { createSupabaseServiceRoleClient } from "@/lib/supabase/service";
 import { NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 
 type RetellWebhookPayload = {
   event?: unknown;
@@ -50,6 +52,28 @@ function getDurationMs(call: Record<string, unknown>) {
   return n;
 }
 
+function countSpeakerTaggedLines(text: string) {
+  let user = 0;
+  let agent = 0;
+  let total = 0;
+
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    const m1 = line.match(/^\s*(?:\[([^\]]+)\]|([^:>-]{1,24}))\s*(?::|->|-)\s*/i);
+    const m2 = line.match(/^\s*(user|callee|candidate|human|customer|agent|assistant)\s*[:>-]\s*/i);
+    const rawTag = String(m1?.[1] ?? m1?.[2] ?? m2?.[1] ?? "")
+      .trim()
+      .toLowerCase();
+    if (!rawTag) continue;
+
+    total += 1;
+    if (["agent", "assistant", "ai"].includes(rawTag)) agent += 1;
+    else if (["user", "callee", "candidate", "human", "customer"].includes(rawTag)) user += 1;
+  }
+
+  return { user, agent, total };
+}
+
 function getUserUtteranceCounts(call: Record<string, unknown>) {
   let user = 0;
   let agent = 0;
@@ -75,6 +99,35 @@ function getUserUtteranceCounts(call: Record<string, unknown>) {
       }
     }
   }
+
+  // Fallback: plain transcript string. Retell often includes speaker-tagged lines (e.g. "User: ...", "Agent: ...").
+  const transcriptTextCandidates: unknown[] = [
+    (call as { transcript?: unknown }).transcript,
+    (call as { transcript_text?: unknown }).transcript_text,
+    (call as { transcript_raw?: unknown }).transcript_raw,
+  ];
+  for (const t of transcriptTextCandidates) {
+    if (typeof t !== "string") continue;
+    const counts = countSpeakerTaggedLines(t);
+    user += counts.user;
+    agent += counts.agent;
+    total += counts.total;
+  }
+
+  // Some Retell payloads include post-call analysis utterance counts.
+  const analysisUserCount =
+    (call as { call_analysis?: { user_utterance_count?: unknown } }).call_analysis?.user_utterance_count ??
+    (call as { post_call_analysis?: { user_utterance_count?: unknown } }).post_call_analysis?.user_utterance_count ??
+    (call as { post_call_analysis_data?: { user_utterance_count?: unknown } }).post_call_analysis_data?.user_utterance_count;
+  const analysisAgentCount =
+    (call as { call_analysis?: { agent_utterance_count?: unknown } }).call_analysis?.agent_utterance_count ??
+    (call as { post_call_analysis?: { agent_utterance_count?: unknown } }).post_call_analysis?.agent_utterance_count ??
+    (call as { post_call_analysis_data?: { agent_utterance_count?: unknown } }).post_call_analysis_data?.agent_utterance_count;
+
+  const userHint = Number(analysisUserCount);
+  const agentHint = Number(analysisAgentCount);
+  if (Number.isFinite(userHint) && userHint > 0) user = Math.max(user, userHint);
+  if (Number.isFinite(agentHint) && agentHint > 0) agent = Math.max(agent, agentHint);
 
   return { user, agent, total };
 }
@@ -249,6 +302,29 @@ function hasUserUtterance(call: Record<string, unknown>) {
   return getUserUtteranceCounts(call).user > 0;
 }
 
+function hasUserUtteranceFromStoredTranscript(transcript: unknown) {
+  if (typeof transcript !== "string") return false;
+  const counts = countSpeakerTaggedLines(transcript);
+  if (counts.user > 0) return true;
+
+  // If we can't see explicit tags, do not assume speech based on freeform text alone.
+  return false;
+}
+
+function deterministicUuidV4(input: string) {
+  const hash = createHash("sha256").update(input).digest();
+  const bytes = Uint8Array.from(hash.slice(0, 16));
+  // v4
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  // variant
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+  const hex = Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 async function updateSessionRollup(sessionId: string, campaignId: string) {
   // Keep this lightweight: determine whether session is still active or completed.
   // We avoid flipping paused/stopped sessions back to running.
@@ -353,6 +429,15 @@ export async function POST(request: Request) {
   const retellCallId = pickString(call.call_id);
   if (!retellCallId) return NextResponse.json({ error: "Missing call.call_id." }, { status: 400 });
 
+  console.log("[retell-webhook] received", {
+    event,
+    call_id: retellCallId,
+    url: request.url,
+    host: request.headers.get("host"),
+    x_forwarded_host: request.headers.get("x-forwarded-host"),
+    has_service_role_key: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE),
+  });
+
   // Safe debug logging (no transcript content).
   try {
     const disconnection = pickString(call.disconnection_reason);
@@ -383,7 +468,7 @@ export async function POST(request: Request) {
 
   const { data: candidateRow, error: candidateLoadError } = await supabase
     .from("campaign_call_candidates")
-    .select("id,campaign_id,call_session_id,call_status,call_completed_at,attempt_count,max_attempts")
+    .select("id,user_id,campaign_id,call_session_id,call_status,call_completed_at,attempt_count,max_attempts")
     .eq("retell_call_id", retellCallId)
     .maybeSingle();
 
@@ -424,17 +509,22 @@ export async function POST(request: Request) {
     update.last_error = failureReason;
   }
 
+  const noAnswerSignal = deriveNoAnswerKind({ call, disconnectionReasonRaw: disconnectionReason, failureReasonRaw: failureReason });
+  const noAnswerLike = Boolean(noAnswerSignal.kind) || Boolean(getInVoicemail(call)) || isNoAnswerLikeDisconnection(String(disconnectionReason ?? ""));
+  const spokeFromPayload = hasUserUtterance(call);
+  const durationMs = getDurationMs(call);
+  const callSuccessful = getCallSuccessful(call);
+
   if (event === "call_ended") {
     // First classify based on call fields.
     let next = classifyEndStatus(call);
 
     // FINAL GUARD: if the provider signaled voicemail/no-answer/decline anywhere (including error/last_error),
     // force no_answer classification even when call_status="ended".
-    const signal = deriveNoAnswerKind({ call, disconnectionReasonRaw: disconnectionReason, failureReasonRaw: failureReason });
-    if (signal.kind) next = "no_answer";
+    if (noAnswerSignal.kind) next = "no_answer";
 
     if (next === "no_answer") {
-      const retryReason = signal.kind ?? "no_answer";
+      const retryReason = noAnswerSignal.kind ?? "no_answer";
       const voicemailDetected = retryReason === "voicemail";
 
       if (attemptCount < maxAttempts) {
@@ -505,6 +595,171 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Database update failed." }, { status: 500 });
   }
 
+  // Billing decision must be based on the persisted row (not only the current webhook payload),
+  // since different webhook events can arrive out-of-order or without setting call_status again.
+  const { data: persistedCandidate } = await supabase
+    .from("campaign_call_candidates")
+    .select("call_status,user_id,campaign_id,call_session_id,transcript")
+    .eq("id", String(candidateRow.id))
+    .maybeSingle();
+  const persistedStatusLower = String((persistedCandidate as { call_status?: unknown } | null)?.call_status ?? "")
+    .trim()
+    .toLowerCase();
+  const spoke = spokeFromPayload || hasUserUtteranceFromStoredTranscript((persistedCandidate as { transcript?: unknown } | null)?.transcript);
+
+  // Credits enforcement phase 2:
+  // Charge exactly 1 credit for answered/connected calls only (candidate spoke).
+  // Do not charge voicemail/no-answer/busy/failed.
+  // Idempotency: one charge per retell_call_id (deterministic transaction id).
+  const billableEvent = event === "call_analyzed" || event === "call_ended";
+  const completed = persistedStatusLower === "completed";
+  // Some Retell payloads do not include structured transcripts or speaker tags even for answered calls.
+  // If the call is persisted as completed and there are no voicemail/no-answer/busy/decline signals,
+  // treat it as a billable answered human call.
+  const durationOk = durationMs == null ? true : durationMs >= 12_000;
+  const successOk = callSuccessful == null ? true : callSuccessful !== false;
+  const shouldBill = billableEvent && completed && !noAnswerLike && durationOk && successOk;
+
+  const billingBlockers: string[] = [];
+  if (!billableEvent) billingBlockers.push("event_not_billable");
+  if (!completed) billingBlockers.push("status_not_completed");
+  if (noAnswerLike) billingBlockers.push("no_answer_like");
+  if (!durationOk) billingBlockers.push("duration_too_short");
+  if (!successOk) billingBlockers.push("call_successful_false");
+
+  console.log("[retell-webhook] billing check", {
+    call_id: retellCallId,
+    event,
+    persisted_call_status: persistedStatusLower || null,
+    has_user_utterance: spoke,
+    no_answer_like: noAnswerLike,
+    no_answer_kind: noAnswerSignal.kind,
+    duration_ms: durationMs,
+    call_successful: callSuccessful,
+    duration_ok: durationOk,
+    success_ok: successOk,
+    should_bill: shouldBill,
+    billing_blockers: billingBlockers,
+  });
+
+  if (shouldBill) {
+    const userId = String((persistedCandidate as { user_id?: unknown } | null)?.user_id ?? "").trim();
+    const campaignId = String((persistedCandidate as { campaign_id?: unknown } | null)?.campaign_id ?? "").trim();
+    if (userId && campaignId) {
+      const txId = deterministicUuidV4(`usage:${retellCallId}`);
+      let billing: ReturnType<typeof createSupabaseServiceRoleClient>;
+      try {
+        billing = createSupabaseServiceRoleClient();
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "Missing Supabase service role configuration.";
+        console.error("[retell-webhook] billing blocked (service role missing)", { call_id: retellCallId, message });
+        // Return 500 so Retell retries the webhook; once env is fixed, billing can succeed idempotently.
+        return NextResponse.json({ error: "Billing configuration error." }, { status: 500 });
+      }
+
+      const { error: txErr } = await billing.from("credit_transactions").insert({
+        id: txId,
+        user_id: userId,
+        campaign_id: campaignId,
+        type: "usage",
+        description: "Answered call",
+        credits: -1,
+        amount_usd: null,
+        status: "completed",
+      });
+
+      // If already charged, skip deduct.
+      const isDuplicate = Boolean((txErr as { code?: unknown } | null)?.code === "23505");
+      if (!txErr || isDuplicate) {
+        if (isDuplicate) {
+          console.log("[retell-webhook] billing skipped (duplicate)", { call_id: retellCallId, txId });
+        } else {
+          console.log("[retell-webhook] billing transaction inserted", { call_id: retellCallId, txId });
+          // Best-effort CAS update to avoid lost updates.
+          for (let attempt = 0; attempt < 4; attempt += 1) {
+            const { data: creditsRow, error: creditsLoadError } = await billing
+              .from("user_credits")
+              .select("balance,total_used")
+              .eq("user_id", userId)
+              .maybeSingle();
+            if (creditsLoadError) {
+              console.warn("[retell-webhook] billing credits load failed", { call_id: retellCallId, userId, message: creditsLoadError.message });
+              break;
+            }
+
+            const balance = Number((creditsRow as { balance?: unknown } | null)?.balance ?? 0);
+            const totalUsed = Number((creditsRow as { total_used?: unknown } | null)?.total_used ?? 0);
+            const nextBalance = Math.max(0, balance - 1);
+            const nextTotalUsed = totalUsed + 1;
+
+            const { data: updatedRows, error: creditsUpdateError } = await billing
+              .from("user_credits")
+              .update({ balance: nextBalance, total_used: nextTotalUsed, updated_at: new Date().toISOString() })
+              .eq("user_id", userId)
+              .eq("balance", balance)
+              .select("balance")
+              .limit(1);
+            if (!creditsUpdateError && updatedRows?.length) {
+              console.log("[retell-webhook] billing credits updated", {
+                call_id: retellCallId,
+                userId,
+                previous_balance: balance,
+                next_balance: nextBalance,
+                next_total_used: nextTotalUsed,
+              });
+              if (nextBalance <= 0) {
+                // Auto-pause outreach when credits are exhausted.
+                const sessionId = String((persistedCandidate as { call_session_id?: unknown } | null)?.call_session_id ?? "");
+                if (sessionId) {
+                  await Promise.all([
+                    supabase.from("campaign_call_sessions").update({ status: "paused_credits", updated_at: new Date().toISOString() }).eq("id", sessionId),
+                    supabase.from("campaigns").update({ status: "Paused", updated_at: new Date().toISOString() }).eq("id", campaignId),
+                  ]);
+                }
+              }
+              break;
+            }
+            if (creditsUpdateError) {
+              console.warn("[retell-webhook] billing credits update failed", {
+                call_id: retellCallId,
+                userId,
+                attempt,
+                message: creditsUpdateError.message,
+              });
+            } else {
+              console.warn("[retell-webhook] billing credits update lost race; retrying", {
+                call_id: retellCallId,
+                userId,
+                attempt,
+                expected_balance: balance,
+              });
+            }
+          }
+        }
+      } else {
+        console.warn("[retell-webhook] credit transaction insert failed", {
+          call_id: retellCallId,
+          code: (txErr as { code?: unknown } | null)?.code ?? null,
+          message: txErr.message,
+        });
+      }
+    } else {
+      console.warn("[retell-webhook] billing skipped (missing user/campaign)", {
+        call_id: retellCallId,
+        userIdPresent: Boolean(userId),
+        campaignIdPresent: Boolean(campaignId),
+      });
+    }
+  } else {
+    console.log("[retell-webhook] billing skipped (not billable)", {
+      call_id: retellCallId,
+      event,
+      persisted_call_status: persistedStatusLower || null,
+      has_user_utterance: spoke,
+      no_answer_like: noAnswerLike,
+    });
+  }
+
   // Callback scheduling: only when the candidate actually spoke and requested a callback.
   // Never schedule callback for voicemail/no-answer outcomes.
   if (event === "call_analyzed") {
@@ -512,10 +767,9 @@ export async function POST(request: Request) {
     const inVoicemail = getInVoicemail(call);
 
     const callbackRequested = shouldScheduleCallback({ transcript, summary: callSummary, candidateAnswers });
-    const spoke = hasUserUtterance(call);
-    const noAnswerLike = inVoicemail || isNoAnswerLikeDisconnection(disconnection) || Boolean(deriveNoAnswerKind({ call, disconnectionReasonRaw: disconnectionReason, failureReasonRaw: failureReason }).kind);
+    const noAnswerLikeForCallback = inVoicemail || isNoAnswerLikeDisconnection(disconnection) || Boolean(noAnswerSignal.kind);
 
-    if (callbackRequested && spoke && !noAnswerLike && attemptCount < maxAttempts) {
+    if (callbackRequested && spoke && !noAnswerLikeForCallback && attemptCount < maxAttempts) {
       const { data: latestRow } = await supabase
         .from("campaign_call_candidates")
         .select("call_status")

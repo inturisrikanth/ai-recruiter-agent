@@ -115,7 +115,7 @@ export async function startCallForCandidateRow(opts: {
 
   let candidateLoadQuery = supabase
     .from("campaign_call_candidates")
-    .select("id,candidate_id,candidate_name,candidate_phone,attempt_count,max_attempts,call_status")
+    .select("id,user_id,candidate_id,candidate_name,candidate_phone,attempt_count,max_attempts,call_status")
     .eq("id", candidateRowId);
   if (userId) candidateLoadQuery = candidateLoadQuery.eq("user_id", userId);
   const { data: candidate, error: candidateError } = await candidateLoadQuery.maybeSingle();
@@ -130,8 +130,28 @@ export async function startCallForCandidateRow(opts: {
   const attemptCount = Number((candidate as { attempt_count?: unknown }).attempt_count ?? 0);
   const maxAttempts = Number((candidate as { max_attempts?: unknown }).max_attempts ?? 3);
   const attemptAt = nowIso();
+  const effectiveUserId = String((candidate as { user_id?: unknown }).user_id ?? "").trim() || userId || "";
 
   if (attemptCount >= maxAttempts) return { started: false, reason: "not_retryable" };
+
+  // Credits enforcement: do not start additional billable calls when balance is exhausted.
+  if (effectiveUserId) {
+    const { data: creditsRow, error: creditsError } = await supabase
+      .from("user_credits")
+      .select("balance")
+      .eq("user_id", effectiveUserId)
+      .maybeSingle();
+    if (creditsError) return { started: false, reason: "retell_failed" };
+    const balance = Number((creditsRow as { balance?: unknown } | null)?.balance ?? 0);
+    if (balance <= 0) {
+      const now = nowIso();
+      await Promise.all([
+        supabase.from("campaign_call_sessions").update({ status: "paused_credits", updated_at: now }).eq("id", sessionId),
+        supabase.from("campaigns").update({ status: "Paused", updated_at: now }).eq("id", campaignId),
+      ]);
+      return { started: false, reason: "paused_or_stopped" };
+    }
+  }
 
   if (!rawPhone || !isE164(rawPhone)) {
     const message = rawPhone ? `Invalid phone number (expected E.164): ${rawPhone}` : "Missing phone number";
@@ -181,6 +201,13 @@ export async function startCallForCandidateRow(opts: {
     if (!fromNumber) throw new Error("Missing RETELL_PHONE_NUMBER.");
     if (!overrideAgentId) throw new Error("Missing RETELL_AGENT_ID.");
 
+    const webhookUrl = process.env.RETELL_WEBHOOK_URL ?? null;
+    if (webhookUrl) {
+      console.log("[outreach] retell webhook override enabled", { webhook_url: webhookUrl });
+    } else {
+      console.log("[outreach] retell webhook override not set");
+    }
+
     const jobTitle = campaignRow ? String((campaignRow as { job_title?: unknown }).job_title ?? "").trim() || null : null;
     const firstQuestion = pickFirstQuestion(selectedQuestions, customQuestions);
     const beginMessage = buildBeginMessage({ candidateName, companyName, jobTitle, firstQuestion });
@@ -207,6 +234,12 @@ export async function startCallForCandidateRow(opts: {
         retell_llm: {
           begin_message: beginMessage,
         },
+        // Optional per-call webhook override to ensure call events reach the correct environment.
+        // If unset, Retell will use the agent/account configured webhook.
+        webhook_url: webhookUrl,
+        webhook_events: webhookUrl
+          ? ["call_started", "call_ended", "call_analyzed", "transcript_updated"]
+          : null,
       },
       metadata: {
         campaign_id: campaignId,

@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 
 type CallSessionStatus = "queued" | "running" | "completed" | "failed" | string;
 const PAUSED_CALLING_WINDOW = "paused_calling_window";
+const PAUSED_CREDITS = "paused_credits";
 
 function chunk<T>(arr: T[], size: number) {
   const out: T[][] = [];
@@ -55,7 +56,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "Campaign must be Ready before starting calls." }, { status: 409 });
   }
 
-  const activeStatuses: CallSessionStatus[] = ["queued", "running", "paused"];
+  const activeStatuses: CallSessionStatus[] = ["queued", "running", "paused", "paused_manual", PAUSED_CALLING_WINDOW, PAUSED_CREDITS];
   const { data: existingSession, error: existingError } = await supabase
     .from("campaign_call_sessions")
     .select("id,status,total_candidates,started_at,created_at")

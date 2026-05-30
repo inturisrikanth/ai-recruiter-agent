@@ -8,6 +8,18 @@ export type RetellCreatePhoneCallRequest = {
       begin_message?: string | null;
       begin_after_user_silence_ms?: number | null;
     };
+    webhook_url?: string | null;
+    webhook_events?: Array<
+      | "call_started"
+      | "call_ended"
+      | "call_analyzed"
+      | "transcript_updated"
+      | "transfer_started"
+      | "transfer_bridged"
+      | "transfer_cancelled"
+      | "transfer_ended"
+    > | null;
+    webhook_timeout_ms?: number | null;
   };
   metadata?: Record<string, unknown>;
 };
@@ -51,6 +63,21 @@ export async function retellCreatePhoneCall(
     agent_override: input.agent_override,
     metadata: input.metadata,
   };
+
+  // Debug: confirm webhook override routing without leaking secrets.
+  try {
+    const toLast4 = String(body.to_number ?? "").slice(-4);
+    const fromLast4 = String(body.from_number ?? "").slice(-4);
+    console.log("[retell] create-phone-call", {
+      to_last4: toLast4,
+      from_last4: fromLast4,
+      override_agent_id: overrideAgentId,
+      webhook_url: body.agent_override?.webhook_url ?? null,
+      webhook_events: body.agent_override?.webhook_events ?? null,
+    });
+  } catch {
+    // ignore
+  }
 
   const res = await fetch("https://api.retellai.com/v2/create-phone-call", {
     method: "POST",

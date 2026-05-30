@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 type Action = "pause" | "resume" | "stop";
 const PAUSED_CALLING_WINDOW = "paused_calling_window";
 const PAUSED_MANUAL = "paused_manual";
+const PAUSED_CREDITS = "paused_credits";
 
 function isAction(value: unknown): value is Action {
   return value === "pause" || value === "resume" || value === "stop";
@@ -42,7 +43,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (!campaign?.id) return NextResponse.json({ error: "Campaign not found." }, { status: 404 });
 
   // Prefer an active session if present, otherwise fall back to the latest session.
-  const activeStatuses = ["queued", "running", "paused", PAUSED_CALLING_WINDOW, PAUSED_MANUAL];
+  const activeStatuses = ["queued", "running", "paused", PAUSED_CALLING_WINDOW, PAUSED_MANUAL, PAUSED_CREDITS];
   const { data: activeSession, error: activeError } = await supabase
     .from("campaign_call_sessions")
     .select("id,status,created_at")

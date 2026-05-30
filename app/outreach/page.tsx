@@ -2,6 +2,7 @@ import { AppShell } from "@/components/dashboard/AppShell";
 import { OutreachControls } from "@/components/outreach/OutreachControls";
 import { ContinueAnywayButton } from "@/components/outreach/ContinueAnywayButton";
 import { RetryNowButton } from "@/components/outreach/RetryNowButton";
+import { ResumeOutreachButton } from "@/components/outreach/ResumeOutreachButton";
 import { getCallingWindowState } from "@/lib/callingWindow";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import Link from "next/link";
@@ -29,6 +30,7 @@ function callSessionLabel(status: CallSessionStatus) {
   if (!s) return "—";
   if (s.toLowerCase() === "paused_calling_window") return "Paused (Outside Calling Hours)";
   if (s.toLowerCase() === "paused_manual") return "Paused Manually";
+  if (s.toLowerCase() === "paused_credits") return "Paused (Credits Exhausted)";
   return s.slice(0, 1).toUpperCase() + s.slice(1);
 }
 
@@ -491,17 +493,18 @@ export default async function OutreachPage({
 
   const sessionId = callSession?.id ? String(callSession.id) : null;
   const sessionStatus = String(callSession?.status ?? "");
+  const sessionStatusLower = sessionStatus.toLowerCase();
   const totalCandidates = Number(callSession?.total_candidates ?? 0);
   const isStopped = sessionStatus.toLowerCase() === "stopped";
   const isPaused = sessionStatus.toLowerCase().startsWith("paused");
   const callingWindow = getCallingWindowState();
-  const sessionStatusLower = sessionStatus.toLowerCase();
+  const pausedByCredits = Boolean(sessionId) && sessionStatusLower === "paused_credits";
   const outreachActiveNow =
     Boolean(sessionId) &&
     !isStopped &&
     (sessionStatusLower === "running" || sessionStatusLower === "queued" || sessionStatusLower === "calling" || sessionStatusLower === "in_progress");
   const pausedByCallingWindow = Boolean(sessionId) && sessionStatusLower === "paused_calling_window" && !outreachActiveNow;
-  const callingWindowEffectiveStatus: "active" | "paused_quiet_hours" | "paused_manual" | "override" | "inactive" =
+  const callingWindowEffectiveStatus: "active" | "paused_quiet_hours" | "paused_manual" | "paused_credits" | "override" | "inactive" =
     isStopped
       ? "inactive"
       : callingWindow.withinWindow
@@ -510,9 +513,11 @@ export default async function OutreachPage({
           ? "override"
           : pausedByCallingWindow
             ? "paused_quiet_hours"
-            : isPaused
-              ? "paused_manual"
-              : "paused_quiet_hours";
+            : sessionStatusLower === "paused_credits"
+              ? "paused_credits"
+              : isPaused
+                ? "paused_manual"
+                : "paused_quiet_hours";
 
   const { data: candidateRows, error: candidateLoadError } = sessionId
     ? await supabase
@@ -592,6 +597,22 @@ export default async function OutreachPage({
           </div>
         </div>
       </header>
+
+      {pausedByCredits ? (
+        <div className="mt-6 rounded-3xl bg-amber-50 p-5 text-sm text-amber-900 ring-1 ring-amber-200/70 sm:p-6">
+          <div className="font-semibold">Your credit balance has been exhausted.</div>
+          <div className="mt-1 text-amber-800">Please add credits and continue outreach.</div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Link
+              href="/finances#buy-credits"
+              className="inline-flex h-11 items-center justify-center rounded-full bg-indigo-600 px-5 text-sm font-semibold text-white shadow-sm ring-1 ring-indigo-500/20 hover:bg-indigo-500"
+            >
+              Add credits
+            </Link>
+            <ResumeOutreachButton campaignId={campaign.id} />
+          </div>
+        </div>
+      ) : null}
 
       <section className="mt-6 rounded-3xl bg-white p-6 shadow-sm ring-1 ring-zinc-200/70 sm:p-7">
         <div className="flex w-full flex-wrap items-start gap-3 sm:flex-nowrap sm:items-center">
