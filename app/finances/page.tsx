@@ -159,10 +159,10 @@ export default async function FinancesPage() {
   // We retry with progressively smaller projections until the API accepts the select list.
   async function loadUsageTransactions(): Promise<unknown[]> {
     const columnAttempts: string[] = [
-      "campaign_id,metadata,campaign_name,credits",
-      "campaign_id,metadata,credits",
-      "campaign_id,campaign_name,credits",
-      "campaign_id,credits",
+      "campaign_id,metadata,campaign_name,credits,created_at",
+      "campaign_id,metadata,credits,created_at",
+      "campaign_id,campaign_name,credits,created_at",
+      "campaign_id,credits,created_at",
     ];
 
     for (const cols of columnAttempts) {
@@ -185,11 +185,13 @@ export default async function FinancesPage() {
   const creditsUsedByCampaign = new Map<string, number>();
   const callsMadeByCampaign = new Map<string, number>();
   const campaignNameHintById = new Map<string, string>();
+  const lastActivityAtByCampaign = new Map<string, string>();
   for (const row of (Array.isArray(usageTxData) ? usageTxData : []) as Array<{
     campaign_id: unknown;
     campaign_name?: unknown;
     metadata?: unknown;
     credits: unknown;
+    created_at?: unknown;
   }>) {
     const cid = String(row.campaign_id ?? "");
     if (!cid) continue;
@@ -210,26 +212,38 @@ export default async function FinancesPage() {
         : "";
     const nameHint = nameFromMetadata || nameFromColumn;
     if (nameHint) campaignNameHintById.set(cid, nameHint);
+
+    const createdAt = String(row.created_at ?? "").trim();
+    if (createdAt) {
+      const prev = lastActivityAtByCampaign.get(cid);
+      if (!prev || createdAt > prev) lastActivityAtByCampaign.set(cid, createdAt);
+    }
   }
 
-  const usageRows: CampaignUsageRow[] = Array.from(callsMadeByCampaign.entries()).map(([campaignId, callsMade]) => {
+  const usageRowsWithLast = Array.from(callsMadeByCampaign.entries()).map(([campaignId, callsMade]) => {
     const existing = campaignById.get(campaignId) ?? null;
-    const campaignName =
-      campaignNameHintById.get(campaignId) ??
-      existing?.name ??
-      "Unknown campaign";
+    const campaignName = campaignNameHintById.get(campaignId) ?? existing?.name ?? "Unknown campaign";
     const campaignStatus = existing?.status ?? "Campaign Deleted";
     const creditsUsedEstimated = creditsUsedByCampaign.get(campaignId) ?? 0;
-    return {
-      campaignId,
-      campaignName,
-      campaignStatus,
-      callsMade,
-      creditsUsedEstimated,
-    };
+    const lastActivityAt = lastActivityAtByCampaign.get(campaignId) ?? null;
+    return { campaignId, campaignName, campaignStatus, callsMade, creditsUsedEstimated, lastActivityAt };
   });
 
-  usageRows.sort((a, b) => b.callsMade - a.callsMade);
+  // Latest-first: sort by most recent billing activity timestamp when available.
+  usageRowsWithLast.sort((a, b) => {
+    const aa = a.lastActivityAt ?? "";
+    const bb = b.lastActivityAt ?? "";
+    if (aa !== bb) return bb.localeCompare(aa);
+    return b.callsMade - a.callsMade;
+  });
+
+  const usageRows: CampaignUsageRow[] = usageRowsWithLast.map((r) => ({
+    campaignId: r.campaignId,
+    campaignName: r.campaignName,
+    campaignStatus: r.campaignStatus,
+    callsMade: r.callsMade,
+    creditsUsedEstimated: r.creditsUsedEstimated,
+  }));
 
   const creditsRow: UserCreditsRow = {
     balance: Number((userCreditsData as { balance?: unknown } | null)?.balance ?? 0),
@@ -319,7 +333,7 @@ export default async function FinancesPage() {
           <Card title="Campaign usage" description="How credits are being used across your campaigns.">
             {usageRows.length ? (
               <div className="overflow-hidden rounded-3xl bg-zinc-50 ring-1 ring-zinc-200/70">
-                <div className="overflow-x-auto">
+                <div className="max-h-[360px] overflow-auto">
                   <table className="min-w-full text-left text-sm md:table-fixed">
                     <colgroup>
                       <col className="md:w-[45%]" />
@@ -327,7 +341,7 @@ export default async function FinancesPage() {
                       <col className="md:w-[15%]" />
                       <col className="md:w-[25%]" />
                     </colgroup>
-                    <thead className="bg-white/60 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    <thead className="sticky top-0 z-10 bg-white/90 text-xs font-semibold uppercase tracking-wide text-zinc-500 backdrop-blur">
                       <tr>
                         <th className="px-4 py-3">Campaign</th>
                         <th className="px-4 py-3 text-right md:text-center">Calls made</th>
@@ -372,9 +386,9 @@ export default async function FinancesPage() {
         <div id="transaction-history" className="scroll-mt-28">
           <Card title="Transaction history" description="Credits purchases and adjustments will appear here.">
             <div className="overflow-hidden rounded-3xl bg-zinc-50 ring-1 ring-zinc-200/70">
-              <div className="overflow-x-auto">
+              <div className="max-h-[420px] overflow-auto">
                 <table className="min-w-full text-left text-sm">
-                  <thead className="bg-white/60 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                  <thead className="sticky top-0 z-10 bg-white/90 text-xs font-semibold uppercase tracking-wide text-zinc-500 backdrop-blur">
                     <tr>
                       <th className="px-4 py-3">Date</th>
                       <th className="px-4 py-3">Type</th>
@@ -417,9 +431,9 @@ export default async function FinancesPage() {
         <div id="invoices-receipts" className="scroll-mt-28">
           <Card title="Invoices & receipts" description="Download invoices and receipts for your records.">
             <div className="overflow-hidden rounded-3xl bg-zinc-50 ring-1 ring-zinc-200/70">
-              <div className="overflow-x-auto">
+              <div className="max-h-[360px] overflow-auto">
                 <table className="min-w-full text-left text-sm">
-                  <thead className="bg-white/60 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                  <thead className="sticky top-0 z-10 bg-white/90 text-xs font-semibold uppercase tracking-wide text-zinc-500 backdrop-blur">
                     <tr>
                       <th className="px-4 py-3">Invoice</th>
                       <th className="px-4 py-3 text-right">Amount</th>

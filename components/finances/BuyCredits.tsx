@@ -71,8 +71,10 @@ export function BuyCredits() {
             onClick={() => onPreset(credits)}
             disabled={isPending}
             className={[
-              "inline-flex h-11 items-center justify-center rounded-full px-5 text-sm font-semibold shadow-sm ring-1 ring-zinc-200/70",
-              isPending ? "cursor-not-allowed bg-zinc-100 text-zinc-500" : "bg-white text-zinc-900 hover:bg-zinc-50",
+              "inline-flex h-11 items-center justify-center rounded-full px-5 text-sm font-semibold shadow-sm ring-1 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/30",
+              isPending
+                ? "cursor-not-allowed bg-zinc-100 text-zinc-500 ring-zinc-200/70"
+                : "bg-white text-zinc-900 ring-zinc-200/70 hover:bg-zinc-50 hover:ring-indigo-200/70",
             ].join(" ")}
           >
             Buy {credits.toLocaleString()} Credits
