@@ -3,6 +3,7 @@ import { FinancesSidebar } from "@/components/dashboard/FinancesSidebar";
 import { StatCard } from "@/components/dashboard/StatCard";
 import type { ReactNode } from "react";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServiceRoleClient } from "@/lib/supabase/service";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -86,6 +87,7 @@ type BillingInvoiceRow = {
 
 export default async function FinancesPage() {
   const supabase = await createSupabaseServerClient();
+  const billing = createSupabaseServiceRoleClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -97,6 +99,7 @@ export default async function FinancesPage() {
     { data: callCandidateData },
     { data: userCreditsData },
     { data: txData },
+    { data: usageTxData },
     { data: invoiceData },
   ] = await Promise.all([
     supabase
@@ -129,6 +132,14 @@ export default async function FinancesPage() {
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(25),
+    billing
+      .from("credit_transactions")
+      .select("campaign_id,credits")
+      .eq("user_id", user.id)
+      .eq("type", "usage")
+      .eq("status", "completed")
+      .not("campaign_id", "is", null)
+      .limit(50000),
     supabase
       .from("billing_invoices")
       .select("id,invoice_number,amount_usd,credits,status,invoice_url,created_at")
@@ -153,11 +164,21 @@ export default async function FinancesPage() {
     callsMadeByCampaign.set(cid, (callsMadeByCampaign.get(cid) ?? 0) + 1);
   }
 
+  const creditsUsedByCampaign = new Map<string, number>();
+  for (const row of (usageTxData ?? []) as Array<{ campaign_id: unknown; credits: unknown }>) {
+    const cid = String(row.campaign_id ?? "");
+    if (!cid) continue;
+    const creditsRaw = Number(row.credits ?? 0);
+    if (!Number.isFinite(creditsRaw) || creditsRaw === 0) continue;
+    const used = Math.abs(creditsRaw);
+    creditsUsedByCampaign.set(cid, (creditsUsedByCampaign.get(cid) ?? 0) + used);
+  }
+
   const usageRows: CampaignUsageRow[] = Array.from(callsMadeByCampaign.entries())
     .map(([campaignId, callsMade]) => {
       const c = campaignById.get(campaignId);
       if (!c) return null;
-      const creditsUsedEstimated = callsMade; // V1: no billing ledger yet; show call-based estimate.
+      const creditsUsedEstimated = creditsUsedByCampaign.get(campaignId) ?? 0;
       return {
         campaignId,
         campaignName: c.name,
