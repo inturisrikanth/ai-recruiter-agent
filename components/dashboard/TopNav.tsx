@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { NotificationsBell } from "@/components/notifications/NotificationsBell";
+import { UniversalSearch } from "@/components/search/UniversalSearch";
 
 type TopNavItem = {
   label: string;
@@ -193,35 +194,8 @@ export function TopNav() {
         </nav>
 
         <div className="flex items-center gap-2">
-          <div className="hidden sm:flex">
-            <label className="relative">
-              <span className="sr-only">Search</span>
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                className="pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2 text-zinc-500"
-                fill="none"
-              >
-                <path
-                  d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                />
-                <path
-                  d="M16.2 16.2 21 21"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                />
-              </svg>
-              <input
-                placeholder="Search"
-                className="h-11 w-[200px] rounded-full bg-white pl-10 pr-10 text-sm text-zinc-950 shadow-sm ring-1 ring-zinc-200/70 placeholder:text-zinc-400 transition focus:outline-none focus:ring-2 focus:ring-indigo-500/15 md:w-[260px]"
-              />
-              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-600 ring-1 ring-zinc-200/80">
-                ⌘K
-              </span>
-            </label>
+          <div className="hidden sm:block">
+            <UniversalSearch />
           </div>
 
           <div className="hidden sm:block">
