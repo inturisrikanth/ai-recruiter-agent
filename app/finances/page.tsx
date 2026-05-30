@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseServiceRoleClient } from "@/lib/supabase/service";
 import { redirect } from "next/navigation";
+import { BuyCredits } from "@/components/finances/BuyCredits";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -12,6 +13,16 @@ export const revalidate = 0;
 function formatCount(value: number | null | undefined, fallback = "—") {
   if (value == null || Number.isNaN(value)) return fallback;
   return Number(value).toLocaleString();
+}
+
+function formatCredits(value: number | null | undefined, fallback = "—") {
+  if (value == null || Number.isNaN(value)) return fallback;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  const abs = Math.abs(n).toLocaleString();
+  if (n > 0) return `+${abs}`;
+  if (n < 0) return `-${abs}`;
+  return "0";
 }
 
 function formatUsd(value: unknown, fallback = "—") {
@@ -299,23 +310,8 @@ export default async function FinancesPage() {
 
       <section className="mt-6 grid gap-6">
         <div id="buy-credits" className="scroll-mt-28">
-          <Card title="Buy credits" description="Add credits to run outreach calls. Payments will be available soon.">
-            <div className="flex flex-wrap gap-2">
-              {[
-                { label: "Buy 100 Credits" },
-                { label: "Buy 500 Credits" },
-                { label: "Buy 1000 Credits" },
-              ].map((b) => (
-                <button
-                  key={b.label}
-                  type="button"
-                  disabled
-                  className="inline-flex h-11 items-center justify-center rounded-full bg-zinc-100 px-5 text-sm font-semibold text-zinc-500 shadow-sm ring-1 ring-zinc-200/70 cursor-not-allowed"
-                >
-                  {b.label} (Coming soon)
-                </button>
-              ))}
-            </div>
+          <Card title="Buy credits" description="Add credits to run outreach calls. (Test purchase flow)">
+            <BuyCredits />
           </Card>
         </div>
 
@@ -399,7 +395,7 @@ export default async function FinancesPage() {
                             </span>
                           </td>
                           <td className="px-4 py-3 text-zinc-700">{t.description || "—"}</td>
-                          <td className="px-4 py-3 text-right text-zinc-700">{t.credits == null ? "—" : formatCount(t.credits)}</td>
+                          <td className="px-4 py-3 text-right text-zinc-700">{formatCredits(t.credits)}</td>
                           <td className="px-4 py-3 text-right text-zinc-700">{formatUsd(t.amount_usd)}</td>
                           <td className="px-4 py-3 text-zinc-700">{t.status || "—"}</td>
                         </tr>
